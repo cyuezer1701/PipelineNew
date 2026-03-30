@@ -210,7 +210,7 @@ async def _render_main(
             f"zoompan=z='1+0.08*on/({dur}*25)'"
             f":x='{zx}':y='{zy}'"
             f":d={dur}*25:s={w}x{h}:fps=25,"
-            f"setpts=PTS-STARTPTS"
+            f"settb=AVTB,setpts=N/25/TB,fps=25"
             f"[v{i}];"
         )
 
