@@ -2,7 +2,7 @@ name: Deploy to Hetzner VPS
 
 on:
   push:
-    branches: [main]
+    branches: [main, claude/youtube-content-automation-SPYq5]
   workflow_dispatch:
 
 env:
@@ -34,12 +34,12 @@ jobs:
             cd ${{ env.DEPLOY_PATH }}
 
             # Clone or pull latest code
+            BRANCH="${{ github.ref_name }}"
             if [ -d ".git" ]; then
-              git fetch origin main
-              git reset --hard origin/main
+              git fetch origin "$BRANCH"
+              git reset --hard "origin/$BRANCH"
             else
-              git clone ${{ github.server_url }}/${{ github.repository }}.git .
-              git checkout main
+              git clone -b "$BRANCH" ${{ github.server_url }}/${{ github.repository }}.git .
             fi
 
             # Copy environment file if it exists
