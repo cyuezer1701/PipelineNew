@@ -130,15 +130,26 @@ async def generate_script(
     )
 
     client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
-    response = await client.messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=4000,
-        system=system,
-        messages=[{"role": "user", "content": user_prompt}],
-    )
-    result = response.content[0].text
 
-    return _parse_response(result)
+    # Try up to 2 times if JSON parsing fails
+    last_error = None
+    for attempt in range(2):
+        response = await client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=6000,
+            system=system,
+            messages=[{"role": "user", "content": user_prompt}],
+        )
+        result = response.content[0].text
+
+        try:
+            return _parse_response(result)
+        except (json.JSONDecodeError, KeyError) as e:
+            last_error = e
+            logger.warning("Script parse failed (attempt %d): %s", attempt + 1, e)
+            user_prompt += "\n\nIMPORTANT: Your previous response had invalid JSON. Output ONLY valid JSON, no trailing commas, no comments."
+
+    raise RuntimeError(f"Script generation failed after 2 attempts: {last_error}")
 
 
 def _parse_response(raw: str) -> ScriptResponse:
@@ -149,6 +160,16 @@ def _parse_response(raw: str) -> ScriptResponse:
     if cleaned.endswith("```"):
         cleaned = cleaned.rsplit("```", 1)[0]
     cleaned = cleaned.strip()
+
+    # Fix common JSON issues from LLMs
+    # Remove trailing commas before } or ]
+    import re
+    cleaned = re.sub(r',\s*([}\]])', r'\1', cleaned)
+
+    # If JSON is truncated (no closing brackets), try to fix
+    open_braces = cleaned.count('{') - cleaned.count('}')
+    open_brackets = cleaned.count('[') - cleaned.count(']')
+    cleaned += ']' * open_brackets + '}' * open_braces
 
     data = json.loads(cleaned)
 
