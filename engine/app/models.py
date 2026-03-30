@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -17,6 +17,7 @@ class GenerateRequest(BaseModel):
     topic: str = Field(..., description="Video topic / title")
     keywords: list[str] = Field(default_factory=list, description="SEO keywords for footage search")
     target_duration: int = Field(default=90, description="Target video length in seconds")
+    video_format: Literal["landscape", "shorts"] = Field(default="landscape", description="landscape (16:9) or shorts (9:16)")
     upload: bool = Field(default=False, description="Auto-upload to YouTube after rendering")
     youtube_title: Optional[str] = None
     youtube_description: Optional[str] = None
@@ -27,6 +28,7 @@ class ScriptRequest(BaseModel):
     topic: str
     keywords: list[str] = Field(default_factory=list)
     target_duration: int = Field(default=90)
+    video_format: Literal["landscape", "shorts"] = "landscape"
 
 
 class ScriptSection(BaseModel):
@@ -41,6 +43,14 @@ class ScriptResponse(BaseModel):
     script: str
     sections: list[ScriptSection]
     estimated_duration: int
+    music_mood: str = "energetic"
+    thumbnail_text: str = ""
+
+
+class WordTimestamp(BaseModel):
+    word: str
+    start: float
+    end: float
 
 
 class RenderRequest(BaseModel):

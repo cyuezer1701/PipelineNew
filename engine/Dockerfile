@@ -1,8 +1,10 @@
 FROM python:3.11-slim
 
-# Install FFmpeg and curl (for healthcheck)
+# Install FFmpeg, curl (healthcheck), fonts, and faster-whisper dependencies
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends ffmpeg curl fonts-dejavu-core && \
+    apt-get install -y --no-install-recommends \
+        ffmpeg curl fonts-dejavu-core \
+        libgomp1 && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
@@ -12,7 +14,10 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
+# Pre-download whisper base model during build (faster startup)
+RUN python -c "from faster_whisper import WhisperModel; WhisperModel('base', device='cpu', compute_type='int8')"
+
+# Copy application code and assets
 COPY app/ ./app/
 COPY assets/ ./assets/
 

@@ -1,7 +1,7 @@
 """Script generation using Anthropic Claude.
 
-Produces richly-structured scripts with 8-15 scenes for professional-looking
-YouTube tutorial videos in the B2B SaaS & AI Automation niche.
+Produces richly-structured scripts with 8-15 scenes, music mood selection,
+thumbnail text, and support for both landscape and shorts formats.
 """
 from __future__ import annotations
 
@@ -15,12 +15,13 @@ from app.models import ScriptResponse, ScriptSection
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """You are an elite YouTube script writer and video director specializing in B2B SaaS & AI Automation tutorials.
+SYSTEM_PROMPT = """You are an elite YouTube script writer and video director for the channel "FlowStack" — specializing in B2B SaaS & AI Automation tutorials.
 
 You write scripts that feel like a human editor cut them — fast-paced, visually dynamic, and engaging.
+Think MrBeast pacing meets tech tutorial value.
 
 STRUCTURE: Create 8-15 short scenes (3-8 seconds each). Each scene gets its own b-roll footage.
-Think like a real YouTube editor: quick cuts, variety, and visual storytelling.
+Quick cuts, variety, and visual storytelling.
 
 Scene types to mix:
 - HOOK: Attention-grabbing opener (3-5 sec)
@@ -29,6 +30,7 @@ Scene types to mix:
 - STEP: Tutorial step with action-oriented overlay (5-8 sec)
 - DEMO: Show the tool/process in action (5-8 sec)
 - BENEFIT: Result/outcome highlight (4-6 sec)
+- TRANSITION: Brief bridge between ideas (2-3 sec)
 - CTA: Call to action (4-5 sec)
 
 Output ONLY valid JSON with this exact structure:
@@ -43,7 +45,9 @@ Output ONLY valid JSON with this exact structure:
       "duration": 5
     }
   ],
-  "estimated_duration": 90
+  "estimated_duration": 90,
+  "music_mood": "energetic",
+  "thumbnail_text": "3-5 WORD THUMBNAIL TEXT"
 }
 
 RULES:
@@ -55,6 +59,20 @@ RULES:
 - b_roll_keywords should be specific and visual (e.g. "person typing laptop" not "technology").
 - Make it sound natural, energetic, like a real YouTuber — not corporate.
 - Include at least one surprising stat or counterintuitive insight.
+- music_mood: choose ONE from "energetic", "chill", "corporate" — match the video vibe.
+- thumbnail_text: Write a 3-5 word CLICKBAIT thumbnail text in ALL CAPS. Must create curiosity.
+  Examples: "THIS CHANGES EVERYTHING", "STOP DOING THIS", "5X FASTER WITH AI"
+"""
+
+SHORTS_PROMPT_ADDON = """
+SHORTS FORMAT: This is a YouTube Short (vertical 9:16 video).
+- Target duration: 30-60 seconds MAX
+- Create 5-8 scenes (shorter, punchier)
+- Each scene 3-5 seconds max
+- overlay_text: MAX 3 words (bigger text on mobile)
+- Hook MUST grab attention in first 2 seconds
+- End with strong CTA in last 3 seconds
+- Be extremely concise — every word counts
 """
 
 
@@ -62,16 +80,26 @@ async def generate_script(
     topic: str,
     keywords: list[str],
     target_duration: int = 90,
+    video_format: str = "landscape",
 ) -> ScriptResponse:
     """Generate a richly-structured video script using Claude."""
     if not settings.anthropic_api_key:
         raise RuntimeError("ANTHROPIC_API_KEY not configured")
 
+    system = SYSTEM_PROMPT
+    if video_format == "shorts":
+        system += SHORTS_PROMPT_ADDON
+        target_duration = min(target_duration, 60)
+
+    scene_min = 5 if video_format == "shorts" else max(8, target_duration // 8)
+    scene_max = 8 if video_format == "shorts" else target_duration // 5
+
     user_prompt = (
         f"Topic: {topic}\n"
         f"Keywords: {', '.join(keywords) if keywords else topic}\n"
         f"Target duration: {target_duration} seconds\n"
-        f"Create {max(8, target_duration // 8)}-{target_duration // 5} scenes.\n"
+        f"Format: {video_format}\n"
+        f"Create {scene_min}-{scene_max} scenes.\n"
         f"Write the script now."
     )
 
@@ -79,7 +107,7 @@ async def generate_script(
     response = await client.messages.create(
         model="claude-sonnet-4-20250514",
         max_tokens=3000,
-        system=SYSTEM_PROMPT,
+        system=system,
         messages=[{"role": "user", "content": user_prompt}],
     )
     result = response.content[0].text
@@ -102,4 +130,6 @@ def _parse_response(raw: str) -> ScriptResponse:
         script=data["script"],
         sections=sections,
         estimated_duration=data.get("estimated_duration", sum(s.duration for s in sections)),
+        music_mood=data.get("music_mood", "energetic"),
+        thumbnail_text=data.get("thumbnail_text", ""),
     )

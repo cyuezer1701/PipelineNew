@@ -17,6 +17,13 @@ class Settings(BaseSettings):
     youtube_client_secret: str = ""
     youtube_refresh_token: str = ""
 
+    # Branding
+    channel_name: str = "FlowStack"
+    channel_tagline: str = "B2B SaaS & AI Automation"
+
+    # Audio
+    music_volume: float = 0.15  # Background music volume (0.0-1.0)
+
     # Paths
     output_dir: str = "/app/output"
     assets_dir: str = "/app/assets"
