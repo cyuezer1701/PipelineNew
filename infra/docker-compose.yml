@@ -33,8 +33,8 @@ services:
       - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
       - N8N_HOST=${DOMAIN:-localhost}
       - N8N_PORT=5678
-      - N8N_PROTOCOL=https
-      - WEBHOOK_URL=https://${DOMAIN:-localhost}/n8n/
+      - N8N_PROTOCOL=http
+      - WEBHOOK_URL=http://${DOMAIN:-localhost}/
       - GENERIC_TIMEZONE=UTC
     volumes:
       - n8n_data:/home/node/.n8n
