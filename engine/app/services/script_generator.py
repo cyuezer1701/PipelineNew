@@ -1,4 +1,4 @@
-"""Script generation using OpenAI (primary) or Anthropic Claude (fallback).
+"""Script generation using Anthropic Claude.
 
 Produces AIDA-structured scripts optimized for 60-second tutorial videos.
 """
@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import json
 import logging
+
+import anthropic
 
 from app.config import settings
 from app.models import ScriptResponse, ScriptSection
@@ -44,43 +46,16 @@ async def generate_script(
     keywords: list[str],
     target_duration: int = 60,
 ) -> ScriptResponse:
-    """Generate an AIDA-structured video script."""
+    """Generate an AIDA-structured video script using Claude."""
+    if not settings.anthropic_api_key:
+        raise RuntimeError("ANTHROPIC_API_KEY not configured")
+
     user_prompt = (
         f"Topic: {topic}\n"
         f"Keywords: {', '.join(keywords) if keywords else topic}\n"
         f"Target duration: {target_duration} seconds\n"
         f"Write the script now."
     )
-
-    # Try OpenAI first, fall back to Anthropic
-    if settings.openai_api_key:
-        result = await _generate_openai(user_prompt)
-    elif settings.anthropic_api_key:
-        result = await _generate_anthropic(user_prompt)
-    else:
-        raise RuntimeError("No AI API key configured (OPENAI_API_KEY or ANTHROPIC_API_KEY)")
-
-    return _parse_response(result)
-
-
-async def _generate_openai(user_prompt: str) -> str:
-    from openai import AsyncOpenAI
-
-    client = AsyncOpenAI(api_key=settings.openai_api_key)
-    response = await client.chat.completions.create(
-        model="gpt-4o",
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": user_prompt},
-        ],
-        temperature=0.7,
-        max_tokens=1500,
-    )
-    return response.choices[0].message.content or ""
-
-
-async def _generate_anthropic(user_prompt: str) -> str:
-    import anthropic
 
     client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
     response = await client.messages.create(
@@ -89,7 +64,9 @@ async def _generate_anthropic(user_prompt: str) -> str:
         system=SYSTEM_PROMPT,
         messages=[{"role": "user", "content": user_prompt}],
     )
-    return response.content[0].text
+    result = response.content[0].text
+
+    return _parse_response(result)
 
 
 def _parse_response(raw: str) -> ScriptResponse:

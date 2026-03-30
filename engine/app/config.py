@@ -2,8 +2,7 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    # AI / Script Generation
-    openai_api_key: str = ""
+    # AI / Script Generation (Claude)
     anthropic_api_key: str = ""
 
     # Voiceover
