@@ -1,7 +1,7 @@
-"""Pexels API stock footage downloader.
+"""Pexels API stock footage downloader — accepts Scene objects.
 
-Downloads one unique clip per scene, using scene-specific b-roll keywords
-for maximum visual variety.
+Downloads one unique clip per scene using scene-specific b-roll keywords.
+Used as primary source for 'pexels' scenes and fallback for failed Runway scenes.
 """
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ import uuid
 import httpx
 
 from app.config import settings
-from app.models import ScriptSection
+from app.models import Scene
 
 logger = logging.getLogger(__name__)
 
@@ -21,12 +21,11 @@ PEXELS_VIDEO_SEARCH = "https://api.pexels.com/videos/search"
 
 
 async def download_footage_for_sections(
-    sections: list[ScriptSection],
+    sections: list[Scene],
 ) -> list[str]:
-    """Download one stock video clip per script section.
+    """Download one stock video clip per scene.
 
-    Uses each section's b_roll_keywords for targeted searches,
-    ensuring visual variety across the entire video.
+    Uses each scene's b_roll_keywords for targeted search.
     """
     if not settings.pexels_api_key:
         raise RuntimeError("PEXELS_API_KEY not configured")
@@ -44,7 +43,6 @@ async def download_footage_for_sections(
             if clip_path:
                 downloaded.append(clip_path)
             else:
-                # Fallback: use a generic tech query
                 clip_path = await _find_and_download_clip(
                     client, headers, ["technology office modern"], used_video_ids
                 )
@@ -54,7 +52,7 @@ async def download_footage_for_sections(
     if not downloaded:
         raise RuntimeError("No stock footage found for any section")
 
-    logger.info("Downloaded %d unique clips for %d sections", len(downloaded), len(sections))
+    logger.info("Downloaded %d unique Pexels clips for %d sections", len(downloaded), len(sections))
     return downloaded
 
 
@@ -80,7 +78,6 @@ async def _find_and_download_clip(
             response.raise_for_status()
             data = response.json()
 
-            # Shuffle to avoid always picking the first result
             videos = data.get("videos", [])
             random.shuffle(videos)
 
@@ -105,11 +102,10 @@ async def _find_and_download_clip(
 
 
 def _pick_best_file(video_files: list[dict]) -> dict | None:
-    """Select the best quality HD file (prefer 1920x1080, fallback to largest)."""
+    """Select the best quality HD file."""
     hd_files = [f for f in video_files if f.get("width", 0) >= 1280]
     if not hd_files:
         hd_files = video_files
-
     if not hd_files:
         return None
 

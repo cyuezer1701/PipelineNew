@@ -13,14 +13,13 @@ from app.models import (
     ScriptResponse,
 )
 from app.services.caption_generator import generate_captions
+from app.services.footage_orchestrator import orchestrate_footage
 from app.services.script_generator import generate_script
-from app.services.stock_footage import download_footage_for_sections
 from app.services.thumbnail_generator import generate_thumbnail
 from app.services.video_renderer import render_video
 from app.services.voiceover import generate_voiceover
 from app.services.youtube_uploader import upload_to_youtube
 
-# In-memory job store (sufficient for single-VPS workload)
 jobs: dict[str, JobResponse] = {}
 
 
@@ -31,8 +30,8 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="YouTube Content Engine — FlowStack",
-    version="2.0.0",
+    title="FlowStack Cinematic Engine",
+    version="3.0.0",
     lifespan=lifespan,
 )
 
@@ -40,39 +39,44 @@ app = FastAPI(
 # ── Full Pipeline ──────────────────────────────────────────
 
 async def _run_pipeline(job_id: str, req: GenerateRequest) -> None:
-    """Execute the full content generation pipeline."""
+    """Execute the cinematic content generation pipeline."""
     try:
         jobs[job_id].status = JobStatus.PROCESSING
 
-        # 1. Generate script
-        jobs[job_id].message = "Generating script..."
+        # 1. Generate cinematic script with Scene objects
+        jobs[job_id].message = "Generating cinematic script..."
         script = await generate_script(
             topic=req.topic,
             keywords=req.keywords,
             target_duration=req.target_duration,
             video_format=req.video_format,
+            use_runway=req.use_runway,
         )
 
-        # 2. Generate voiceover from script (with loudnorm)
+        # 2. Generate voiceover (TTS or STS mode)
         jobs[job_id].message = "Generating voiceover..."
-        audio_path = await generate_voiceover(script.script)
+        audio_path = await generate_voiceover(
+            text=script.script,
+            guide_audio_path=req.guide_audio_url,
+        )
 
-        # 3. Generate word-level captions from audio
+        # 3. Generate word-level captions
         jobs[job_id].message = "Generating captions..."
         captions = await generate_captions(audio_path)
 
-        # 4. Download stock footage (one clip per scene)
-        jobs[job_id].message = "Downloading stock footage..."
-        footage_paths = await download_footage_for_sections(
-            sections=script.sections,
+        # 4. Orchestrate footage (Runway AI + Pexels stock, 70/30 mix)
+        jobs[job_id].message = "Generating footage (AI + stock)..."
+        footage_paths = await orchestrate_footage(
+            scenes=script.scenes,
+            character_ref=req.runway_character_ref,
         )
 
-        # 5. Render video (all effects: transitions, captions, music, intro/outro, color grade)
-        jobs[job_id].message = "Rendering video..."
+        # 5. Render cinematic video (retention editing, J-cuts, pattern interrupts)
+        jobs[job_id].message = "Rendering cinematic video..."
         output_path = await render_video(
             footage_paths=footage_paths,
             audio_path=audio_path,
-            sections=script.sections,
+            scenes=script.scenes,
             target_duration=req.target_duration,
             captions=captions,
             music_mood=script.music_mood,
@@ -93,7 +97,8 @@ async def _run_pipeline(job_id: str, req: GenerateRequest) -> None:
             "script": script.script,
             "music_mood": script.music_mood,
             "captions_count": len(captions),
-            "sections_count": len(script.sections),
+            "scenes_count": len(script.scenes),
+            "character_description": script.character_description,
         }
 
         # 7. Upload to YouTube (optional)
@@ -118,27 +123,24 @@ async def _run_pipeline(job_id: str, req: GenerateRequest) -> None:
 
 @app.post("/api/generate", response_model=JobResponse)
 async def generate(req: GenerateRequest, bg: BackgroundTasks):
-    """Kick off the full video generation pipeline (async)."""
+    """Kick off the cinematic video generation pipeline."""
     job_id = uuid.uuid4().hex[:12]
     jobs[job_id] = JobResponse(job_id=job_id, status=JobStatus.PENDING, message="Queued")
     bg.add_task(_run_pipeline, job_id, req)
     return jobs[job_id]
 
 
-# ── Individual Endpoints ───────────────────────────────────
-
 @app.post("/api/script", response_model=ScriptResponse)
 async def script(req: ScriptRequest):
-    """Generate an AIDA-structured script."""
+    """Generate a cinematic script with Scene objects."""
     return await generate_script(
         topic=req.topic,
         keywords=req.keywords,
         target_duration=req.target_duration,
         video_format=req.video_format,
+        use_runway=req.use_runway,
     )
 
-
-# ── Job Status ─────────────────────────────────────────────
 
 @app.get("/api/jobs/{job_id}", response_model=JobResponse)
 async def get_job(job_id: str):
@@ -147,8 +149,6 @@ async def get_job(job_id: str):
     return jobs[job_id]
 
 
-# ── Health Check ───────────────────────────────────────────
-
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "service": "flowstack-content-engine", "version": "2.0.0"}
+    return {"status": "ok", "service": "flowstack-cinematic-engine", "version": "3.0.0"}
