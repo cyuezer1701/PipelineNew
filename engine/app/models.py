@@ -73,7 +73,7 @@ class GenerateRequest(BaseModel):
     youtube_tags: list[str] = Field(default_factory=list)
     # v3.0 additions
     guide_audio_url: Optional[str] = Field(default=None, description="Guide audio for STS mode")
-    use_runway: bool = Field(default=False, description="Use Runway Gen-4.5 for AI footage")
+    use_runway: bool = Field(default=True, description="Use Runway Gen-4.5 for AI footage")
     runway_character_ref: Optional[str] = Field(default=None, description="Character reference image URL")
 
 
