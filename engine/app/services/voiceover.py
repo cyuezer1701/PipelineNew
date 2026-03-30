@@ -19,7 +19,7 @@ async def generate_voiceover(text: str) -> str:
 
     client = AsyncElevenLabs(api_key=settings.elevenlabs_api_key)
 
-    audio_generator = await client.text_to_speech.convert(
+    audio_generator = client.text_to_speech.convert(
         voice_id=settings.elevenlabs_voice_id,
         text=text,
         model_id="eleven_multilingual_v2",
