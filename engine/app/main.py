@@ -13,7 +13,7 @@ from app.models import (
     ScriptResponse,
 )
 from app.services.script_generator import generate_script
-from app.services.stock_footage import download_footage
+from app.services.stock_footage import download_footage_for_sections
 from app.services.video_renderer import render_video
 from app.services.voiceover import generate_voiceover
 from app.services.youtube_uploader import upload_to_youtube
@@ -54,12 +54,10 @@ async def _run_pipeline(job_id: str, req: GenerateRequest) -> None:
         jobs[job_id].message = "Generating voiceover..."
         audio_path = await generate_voiceover(script.script)
 
-        # 3. Download stock footage
+        # 3. Download stock footage (one clip per scene)
         jobs[job_id].message = "Downloading stock footage..."
-        search_terms = req.keywords or [req.topic]
-        footage_paths = await download_footage(
-            queries=search_terms,
-            target_duration=req.target_duration,
+        footage_paths = await download_footage_for_sections(
+            sections=script.sections,
         )
 
         # 4. Render video

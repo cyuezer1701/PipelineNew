@@ -1,48 +1,78 @@
-"""Pexels API stock footage downloader."""
+"""Pexels API stock footage downloader.
+
+Downloads one unique clip per scene, using scene-specific b-roll keywords
+for maximum visual variety.
+"""
 from __future__ import annotations
 
 import logging
 import os
+import random
 import uuid
 
 import httpx
 
 from app.config import settings
+from app.models import ScriptSection
 
 logger = logging.getLogger(__name__)
 
 PEXELS_VIDEO_SEARCH = "https://api.pexels.com/videos/search"
 
 
-async def download_footage(
-    queries: list[str],
-    target_duration: int = 60,
-    per_clip: int = 15,
+async def download_footage_for_sections(
+    sections: list[ScriptSection],
 ) -> list[str]:
-    """Search and download stock videos from Pexels.
+    """Download one stock video clip per script section.
 
-    Downloads enough clips to cover `target_duration` seconds,
-    aiming for clips around `per_clip` seconds each.
+    Uses each section's b_roll_keywords for targeted searches,
+    ensuring visual variety across the entire video.
     """
     if not settings.pexels_api_key:
         raise RuntimeError("PEXELS_API_KEY not configured")
 
-    clips_needed = max(1, target_duration // per_clip)
     downloaded: list[str] = []
-
+    used_video_ids: set[int] = set()
     headers = {"Authorization": settings.pexels_api_key}
 
     async with httpx.AsyncClient(timeout=60.0) as client:
-        for query in queries:
-            if len(downloaded) >= clips_needed:
-                break
+        for section in sections:
+            queries = section.b_roll_keywords or [section.label.lower()]
+            clip_path = await _find_and_download_clip(
+                client, headers, queries, used_video_ids
+            )
+            if clip_path:
+                downloaded.append(clip_path)
+            else:
+                # Fallback: use a generic tech query
+                clip_path = await _find_and_download_clip(
+                    client, headers, ["technology office modern"], used_video_ids
+                )
+                if clip_path:
+                    downloaded.append(clip_path)
 
+    if not downloaded:
+        raise RuntimeError("No stock footage found for any section")
+
+    logger.info("Downloaded %d unique clips for %d sections", len(downloaded), len(sections))
+    return downloaded
+
+
+async def _find_and_download_clip(
+    client: httpx.AsyncClient,
+    headers: dict,
+    queries: list[str],
+    used_ids: set[int],
+) -> str | None:
+    """Search Pexels and download one clip not already used."""
+    for query in queries:
+        try:
             response = await client.get(
                 PEXELS_VIDEO_SEARCH,
                 headers=headers,
                 params={
                     "query": query,
-                    "per_page": clips_needed - len(downloaded),
+                    "per_page": 10,
                     "size": "medium",
                     "orientation": "landscape",
                 },
@@ -50,23 +80,28 @@ async def download_footage(
             response.raise_for_status()
             data = response.json()
 
-            for video in data.get("videos", []):
-                if len(downloaded) >= clips_needed:
-                    break
+            # Shuffle to avoid always picking the first result
+            videos = data.get("videos", [])
+            random.shuffle(videos)
 
-                # Pick the best HD file
+            for video in videos:
+                vid_id = video.get("id")
+                if vid_id in used_ids:
+                    continue
+
                 video_file = _pick_best_file(video.get("video_files", []))
                 if not video_file:
                     continue
 
                 file_path = await _download_file(client, video_file["link"])
-                downloaded.append(file_path)
-                logger.info("Downloaded clip: %s", file_path)
+                used_ids.add(vid_id)
+                logger.info("Downloaded clip for '%s': %s", query, file_path)
+                return file_path
+        except Exception as e:
+            logger.warning("Failed to fetch clip for '%s': %s", query, e)
+            continue
 
-    if not downloaded:
-        raise RuntimeError(f"No stock footage found for queries: {queries}")
-
-    return downloaded
+    return None
 
 
 def _pick_best_file(video_files: list[dict]) -> dict | None:
@@ -78,7 +113,6 @@ def _pick_best_file(video_files: list[dict]) -> dict | None:
     if not hd_files:
         return None
 
-    # Prefer 1080p
     for f in hd_files:
         if f.get("width") == 1920 and f.get("height") == 1080:
             return f

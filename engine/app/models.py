@@ -16,7 +16,7 @@ class JobStatus(str, Enum):
 class GenerateRequest(BaseModel):
     topic: str = Field(..., description="Video topic / title")
     keywords: list[str] = Field(default_factory=list, description="SEO keywords for footage search")
-    target_duration: int = Field(default=60, description="Target video length in seconds")
+    target_duration: int = Field(default=90, description="Target video length in seconds")
     upload: bool = Field(default=False, description="Auto-upload to YouTube after rendering")
     youtube_title: Optional[str] = None
     youtube_description: Optional[str] = None
@@ -26,20 +26,21 @@ class GenerateRequest(BaseModel):
 class ScriptRequest(BaseModel):
     topic: str
     keywords: list[str] = Field(default_factory=list)
-    target_duration: int = Field(default=60)
-
-
-class ScriptResponse(BaseModel):
-    script: str
-    sections: list[ScriptSection]
-    estimated_duration: int
+    target_duration: int = Field(default=90)
 
 
 class ScriptSection(BaseModel):
     label: str
     text: str
     overlay_text: str = ""
-    duration: int = 10
+    b_roll_keywords: list[str] = Field(default_factory=list)
+    duration: int = 5
+
+
+class ScriptResponse(BaseModel):
+    script: str
+    sections: list[ScriptSection]
+    estimated_duration: int
 
 
 class RenderRequest(BaseModel):
