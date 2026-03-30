@@ -1,0 +1,135 @@
+{
+  "name": "Trend Scraper - ProductHunt & TechNews",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 6
+            }
+          ]
+        }
+      },
+      "id": "cron-trigger",
+      "name": "Every 6 Hours",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [220, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://api.producthunt.com/v2/api/graphql",
+        "method": "POST",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "query",
+              "value": "{ posts(order: VOTES, first: 10) { edges { node { name tagline votesCount topics { edges { node { name } } } } } } }"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "ph-fetch",
+      "name": "Fetch ProductHunt",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [440, 200]
+    },
+    {
+      "parameters": {
+        "url": "https://hacker-news.firebaseio.com/v0/topstories.json",
+        "method": "GET",
+        "options": {}
+      },
+      "id": "hn-fetch",
+      "name": "Fetch HN Top Stories",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [440, 400]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false
+          },
+          "combinator": "or",
+          "conditions": [
+            {
+              "leftValue": "={{ $json.tagline || $json.title || '' }}",
+              "rightValue": "SaaS",
+              "operator": { "type": "string", "operation": "contains" }
+            },
+            {
+              "leftValue": "={{ $json.tagline || $json.title || '' }}",
+              "rightValue": "AI",
+              "operator": { "type": "string", "operation": "contains" }
+            },
+            {
+              "leftValue": "={{ $json.tagline || $json.title || '' }}",
+              "rightValue": "automation",
+              "operator": { "type": "string", "operation": "contains" }
+            }
+          ]
+        }
+      },
+      "id": "filter-relevant",
+      "name": "Filter B2B/AI/SaaS",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2,
+      "position": [660, 300]
+    },
+    {
+      "parameters": {
+        "url": "http://engine:8000/api/script",
+        "method": "POST",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ topic: $json.name || $json.title, keywords: ['SaaS', 'AI', 'automation', 'tutorial'] }) }}",
+        "options": {}
+      },
+      "id": "trigger-script",
+      "name": "Send to Script Generator",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [880, 300]
+    }
+  ],
+  "connections": {
+    "Every 6 Hours": {
+      "main": [
+        [
+          { "node": "Fetch ProductHunt", "type": "main", "index": 0 },
+          { "node": "Fetch HN Top Stories", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Fetch ProductHunt": {
+      "main": [
+        [{ "node": "Filter B2B/AI/SaaS", "type": "main", "index": 0 }]
+      ]
+    },
+    "Fetch HN Top Stories": {
+      "main": [
+        [{ "node": "Filter B2B/AI/SaaS", "type": "main", "index": 0 }]
+      ]
+    },
+    "Filter B2B/AI/SaaS": {
+      "main": [
+        [{ "node": "Send to Script Generator", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    { "name": "trend-scraper" }
+  ]
+}

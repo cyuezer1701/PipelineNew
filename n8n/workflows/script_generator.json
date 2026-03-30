@@ -1,0 +1,110 @@
+{
+  "name": "Script Generator - AIDA Structured",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "generate-script",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook - Script Request",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [220, 300]
+    },
+    {
+      "parameters": {
+        "url": "http://engine:8000/api/script",
+        "method": "POST",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ topic: $json.body.topic, keywords: $json.body.keywords || [], target_duration: $json.body.target_duration || 60 }) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "call-engine-script",
+      "name": "Call Engine - Script",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [440, 300]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "topic",
+              "value": "={{ $('Webhook - Script Request').item.json.body.topic }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "prepare-render",
+      "name": "Prepare Render Payload",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [660, 300]
+    },
+    {
+      "parameters": {
+        "url": "http://engine:8000/api/generate",
+        "method": "POST",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ topic: $json.topic, keywords: $('Webhook - Script Request').item.json.body.keywords || ['SaaS', 'AI'], target_duration: 60, upload: false }) }}",
+        "options": {
+          "timeout": 600000
+        }
+      },
+      "id": "trigger-render",
+      "name": "Trigger Full Pipeline",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [880, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ status: 'pipeline_triggered', job_id: $json.job_id }) }}",
+        "options": {}
+      },
+      "id": "respond-webhook",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1100, 300]
+    }
+  ],
+  "connections": {
+    "Webhook - Script Request": {
+      "main": [
+        [{ "node": "Call Engine - Script", "type": "main", "index": 0 }]
+      ]
+    },
+    "Call Engine - Script": {
+      "main": [
+        [{ "node": "Prepare Render Payload", "type": "main", "index": 0 }]
+      ]
+    },
+    "Prepare Render Payload": {
+      "main": [
+        [{ "node": "Trigger Full Pipeline", "type": "main", "index": 0 }]
+      ]
+    },
+    "Trigger Full Pipeline": {
+      "main": [
+        [{ "node": "Respond to Webhook", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    { "name": "script-generator" }
+  ]
+}

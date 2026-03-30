@@ -1,0 +1,124 @@
+{
+  "name": "Render Trigger - Video Pipeline",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "render-video",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-render",
+      "name": "Webhook - Render Request",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [220, 300]
+    },
+    {
+      "parameters": {
+        "url": "http://engine:8000/api/generate",
+        "method": "POST",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ topic: $json.body.topic, keywords: $json.body.keywords || [], target_duration: $json.body.target_duration || 60, upload: $json.body.upload || false, youtube_title: $json.body.youtube_title || null, youtube_description: $json.body.youtube_description || null, youtube_tags: $json.body.youtube_tags || [] }) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "start-pipeline",
+      "name": "Start Generation Pipeline",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [440, 300]
+    },
+    {
+      "parameters": {
+        "amount": 30,
+        "unit": "seconds"
+      },
+      "id": "wait-render",
+      "name": "Wait for Render",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [660, 300]
+    },
+    {
+      "parameters": {
+        "url": "=http://engine:8000/api/jobs/{{ $('Start Generation Pipeline').item.json.job_id }}",
+        "method": "GET",
+        "options": {}
+      },
+      "id": "check-status",
+      "name": "Check Job Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [880, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true },
+          "combinator": "and",
+          "conditions": [
+            {
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "processing",
+              "operator": { "type": "string", "operation": "equals" }
+            }
+          ]
+        }
+      },
+      "id": "still-processing",
+      "name": "Still Processing?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1100, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ status: $json.status, job_id: $json.job_id, result: $json.result || null, message: $json.message }) }}",
+        "options": {}
+      },
+      "id": "respond-done",
+      "name": "Respond - Done",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1320, 400]
+    }
+  ],
+  "connections": {
+    "Webhook - Render Request": {
+      "main": [
+        [{ "node": "Start Generation Pipeline", "type": "main", "index": 0 }]
+      ]
+    },
+    "Start Generation Pipeline": {
+      "main": [
+        [{ "node": "Wait for Render", "type": "main", "index": 0 }]
+      ]
+    },
+    "Wait for Render": {
+      "main": [
+        [{ "node": "Check Job Status", "type": "main", "index": 0 }]
+      ]
+    },
+    "Check Job Status": {
+      "main": [
+        [{ "node": "Still Processing?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Still Processing?": {
+      "main": [
+        [{ "node": "Wait for Render", "type": "main", "index": 0 }],
+        [{ "node": "Respond - Done", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    { "name": "render-trigger" }
+  ]
+}
