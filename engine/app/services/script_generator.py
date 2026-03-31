@@ -81,24 +81,23 @@ FOOTAGE SOURCE per scene:
 - "pexels": Stats, transitions, generic B-roll
 - "mixed": System decides
 
-PATTERN INTERRUPTS: For scenes >5 seconds, include "sub_shots" array with 2-3 sub-shots of 2.5-3.5s each. Each sub-shot has: shot_type, visual_prompt, duration, transform (zoom_in/zoom_out/pan_left/pan_right/dolly).
+PATTERN INTERRUPTS: The video renderer handles sub-shot splitting automatically. Do NOT include sub_shots in your output.
 
 ## OUTPUT FORMAT
-Output ONLY valid JSON:
+Output ONLY valid JSON. Keep it simple — no nested arrays except b_roll_keywords:
 {
   "script": "Full narration text (all scenes combined, reads like one flowing story)",
   "scenes": [
     {
       "scene_id": 1,
       "label": "HOOK",
-      "narration": "Four thousand dollars. That's what this thing made in a week.",
+      "narration": "Four thousand dollars. That is what this thing made in a week.",
       "overlay_text": "$4,200 IN 7 DAYS",
       "shot_type": "close_up",
-      "visual_prompt": "Laptop screen showing dashboard with revenue numbers, dramatic blue lighting, shallow depth of field",
+      "visual_prompt": "Laptop screen showing dashboard with revenue numbers, dramatic blue lighting",
       "b_roll_keywords": ["revenue dashboard", "money screen"],
-      "footage_source": "runway",
-      "duration": 3,
-      "sub_shots": []
+      "footage_source": "pexels",
+      "duration": 3
     }
   ],
   "estimated_duration": 90,
@@ -121,6 +120,9 @@ Output ONLY valid JSON:
 - Use "I" not "you" in hooks and proof sections. Use "you" in steps.
 - Include at least ONE specific tool name (n8n, Zapier, Claude, Make, etc.)
 - Include at least ONE specific number/metric in the proof section
+- Do NOT include sub_shots — the renderer handles this automatically
+- NEVER use apostrophes (') or special quotes in narration or overlay_text — use "that is" instead of "that's"
+- Keep JSON flat and simple. No nested objects except the scenes array.
 """
 
 SHORTS_ADDON = """
