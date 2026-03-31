@@ -31,6 +31,10 @@ class Settings(BaseSettings):
     channel_name: str = "FlowStack"
     channel_tagline: str = "B2B SaaS & AI Automation"
 
+    # Roast Branding
+    roast_channel_name: str = "JOB ROAST"
+    roast_channel_tagline: str = "Die schlimmsten Stellenanzeigen Deutschlands"
+
     # Audio
     music_volume: float = 0.15
     sfx_volume: float = 0.35

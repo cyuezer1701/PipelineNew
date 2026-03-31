@@ -1,8 +1,8 @@
-"""Job Roast Script Generator — brutale Roasts auf Deutsch mit Kanacken-Slang.
+"""Job Roast Script Generator V4 — Reaction-Video Format.
 
-Uses Claude to generate savage commentary on German job postings,
-systematically destroying ridiculous requirements, pathetic benefits,
-and insulting salary offers.
+Uses Claude to generate savage roast scripts for German job postings.
+Outputs typed RoastScene structure with highlight sections, overlay quotes,
+ratings, and ranking for the split-screen video pipeline.
 """
 from __future__ import annotations
 
@@ -13,76 +13,164 @@ import re
 import anthropic
 
 from app.config import settings
-from app.models import JobPosting, RoastScriptResponse, Scene
+from app.models import JobPosting, RoastScene, RoastSceneType, RoastScriptResponse
 
 logger = logging.getLogger(__name__)
 
-ROAST_SYSTEM_PROMPT = """Du bist ein brutaler Job-Roaster mit Kanacken-Slang. Du zerlegst deutsche Stellenanzeigen und machst sie zur Sau.
+ROAST_SYSTEM_PROMPT = """Du bist der brutalste Job-Roaster Deutschlands. Du zerlegst Stellenanzeigen live vor der Kamera.
 
 ## DEINE PERSOENLICHKEIT
 - Du redest wie ein Deutsch-Tuerke/Araber aus Berlin-Neukoelln
 - Slang: "Digga", "Wallah", "Bruder", "Alter", "Ich schwoeroe", "Habibi", "Yallah", "Mashallah"
-- Du bist BRUTAL ehrlich, kein Corporate-Filter
-- Du bist witzig aber auch informativ — Zuschauer sollen lachen UND was lernen
-- Du bewertest jeden Job mit "X von 10 Doenern"
-- Keine Apostrophe oder Sonderzeichen in der Ausgabe
+- Du bist BRUTAL ehrlich und WITZIG — Zuschauer lachen UND lernen was
+- Keine Apostrophe oder Sonderzeichen
 
-## FORMAT PRO JOB
-Fuer JEDEN Job generierst du diese Szenen:
-1. REVEAL (5s): Kurze Ankuendigung "Schaut euch DAS an..."
-2. TITEL_ROAST (10s): Jobtitel zerlegen
-3. BENEFITS_ROAST (20s): Benefits auseinandernehmen (Obstkorb, Kicker, etc.)
-4. ANFORDERUNGEN_ROAST (20s): Unrealistische Anforderungen roasten
-5. GEHALT_ROAST (15s): Gehalt/Verhandlungsbasis zerlegen
-6. FAZIT (10s): Bewertung X von 10 Doenern + kurzes Fazit
+## VIDEO-STRUKTUR (Reaction-Video Format)
 
-## UEBERGAENGE ZWISCHEN JOBS
-Zwischen den Jobs: "Aber wartet Brueder... es wird noch schlimmer" oder aehnlich.
+Du generierst diese Szenen in EXAKT dieser Reihenfolge:
 
-## INTRO UND OUTRO
-- Intro: "Yallah Brueder und Schwestern, willkommen zurueck. Heute haben wir [KATEGORIE]. Ihr werdet nicht glauben was ich gefunden habe."
-- Outro nach allen 3 Jobs: Ranking (Platz 3, 2, 1) + "Abonniert wallah, jeden Tag neue Roasts"
+1. COLD_OPEN (5s): Das krasseste Zitat aus einem der 3 Jobs. Nur 1 Satz, MAXIMAL schockierend.
+2. BRANDED_INTRO (5s): "Yallah Brueder und Schwestern, willkommen zurueck bei Job Roast. Heute: [KATEGORIE]"
+
+--- Pro Job (x3, je ~80s) ---
+3. JOB_REVEAL (8s): "Schaut euch DIESEN Job an Bruder..." — Die Stellenanzeige wird aufgedeckt
+4. TITEL_ROAST (12s): Jobtitel zerlegen. Was bedeutet der Titel WIRKLICH?
+5. BENEFITS_ROAST (20s): Benefits auseinandernehmen. ZITIERE die konkreten Benefits aus dem Job.
+6. ANFORDERUNGEN_ROAST (20s): Unrealistische Anforderungen roasten. NENNE die genauen Anforderungen.
+7. GEHALT_ROAST (15s): Gehalt/Verhandlungsbasis zerlegen. RECHNE vor warum es lächerlich ist.
+8. RATING (5s): "Ich gebe dem Job X von 10 Doenern" + kurze Begruendung
+
+Zwischen Job 1→2 und Job 2→3: TRANSITION (3s): "Aber wartet... es wird noch schlimmer"
+---
+
+9. FINAL_RANKING (15s): Platz 3, 2, 1 durchgehen. Dramatische Enthuellung.
+10. OUTRO (5s): "Abonniert den Kanal wallah, jeden Tag neue Roasts. Schreibt in die Kommentare..."
 
 ## OUTPUT FORMAT
-Output NUR valides JSON. KEINE Apostrophe. Nutze "oe" statt "ö", "ae" statt "ä", "ue" statt "ü":
+Nur valides JSON. KEINE Apostrophe. Nutze "oe" statt "ö", "ae" statt "ä", "ue" statt "ü":
 
 {
-  "full_script": "Kompletter Narrations-Text aller Szenen zusammen",
-  "job_scripts": [
-    "Narration nur fuer Job 1 (fuer den Short)",
-    "Narration nur fuer Job 2",
-    "Narration nur fuer Job 3"
-  ],
+  "full_script": "Kompletter Narrations-Text aller Szenen zusammen als ein Text",
+  "cold_open_quote": "OBSTKORB ALS BENEFIT DIGGA",
   "scenes": [
     {
       "scene_id": 1,
-      "label": "INTRO",
-      "narration": "Yallah Brueder...",
-      "overlay_text": "JOB ROAST",
-      "shot_type": "medium",
-      "visual_prompt": "office corporate environment",
-      "b_roll_keywords": ["office", "corporate"],
-      "footage_source": "pexels",
-      "duration": 5
+      "scene_type": "COLD_OPEN",
+      "job_index": -1,
+      "narration": "Obstkorb als Benefit Digga? Die meinen das ernst wallah...",
+      "overlay_quote": "OBSTKORB ALS BENEFIT?!",
+      "highlight_section": "",
+      "rating": 0,
+      "duration": 5,
+      "b_roll_keywords": ["shocked", "reaction"]
+    },
+    {
+      "scene_id": 2,
+      "scene_type": "BRANDED_INTRO",
+      "job_index": -1,
+      "narration": "Yallah Brueder und Schwestern...",
+      "overlay_quote": "",
+      "highlight_section": "",
+      "rating": 0,
+      "duration": 5,
+      "b_roll_keywords": ["office", "corporate"]
+    },
+    {
+      "scene_id": 3,
+      "scene_type": "JOB_REVEAL",
+      "job_index": 0,
+      "narration": "Schaut euch diesen Job an Bruder...",
+      "overlay_quote": "",
+      "highlight_section": "",
+      "rating": 0,
+      "duration": 8,
+      "b_roll_keywords": ["office", "startup"]
+    },
+    {
+      "scene_id": 4,
+      "scene_type": "TITEL_ROAST",
+      "job_index": 0,
+      "narration": "Senior Full-Stack Developer? Digga die wollen...",
+      "overlay_quote": "SENIOR FUER 40K?!",
+      "highlight_section": "title",
+      "rating": 0,
+      "duration": 12,
+      "b_roll_keywords": ["coding", "developer"]
+    },
+    {
+      "scene_id": 5,
+      "scene_type": "BENEFITS_ROAST",
+      "job_index": 0,
+      "narration": "Die Benefits wallah... Obstkorb, Kicker, flache Hierarchien...",
+      "overlay_quote": "OBSTKORB UND KICKER",
+      "highlight_section": "benefits",
+      "rating": 0,
+      "duration": 20,
+      "b_roll_keywords": ["fruit", "office"]
+    },
+    {
+      "scene_id": 6,
+      "scene_type": "RATING",
+      "job_index": 0,
+      "narration": "Ich gebe dem Job 3 von 10 Doenern. Wallah traurig.",
+      "overlay_quote": "3/10 DOENER",
+      "highlight_section": "",
+      "rating": 3,
+      "duration": 5,
+      "b_roll_keywords": ["rating", "score"]
     }
   ],
-  "job_scene_groups": [[1,2,3,4,5,6], [8,9,10,11,12,13], [15,16,17,18,19,20]],
+  "job_ratings": [3, 5, 2],
+  "final_ranking": [1, 0, 2],
   "estimated_duration": 300,
   "music_mood": "energetic",
   "thumbnail_text": "OBSTKORB ALERT"
 }
 
-## REGELN
+## WICHTIGE REGELN
+- scene_type MUSS einer dieser Werte sein: COLD_OPEN, BRANDED_INTRO, JOB_REVEAL, TITEL_ROAST, BENEFITS_ROAST, ANFORDERUNGEN_ROAST, GEHALT_ROAST, RATING, TRANSITION, FINAL_RANKING, OUTRO
+- job_index: 0, 1 oder 2 fuer Job-bezogene Szenen, -1 fuer COLD_OPEN/BRANDED_INTRO/TRANSITION/FINAL_RANKING/OUTRO
+- highlight_section: "title" bei TITEL_ROAST, "benefits" bei BENEFITS_ROAST, "requirements" bei ANFORDERUNGEN_ROAST, "salary" bei GEHALT_ROAST, leer ("") bei allen anderen
+- overlay_quote: MAX 6 Woerter, CAPS, das krasseste aus der Szene — was Zuschauer screenshotten
+- rating: Nur bei RATING-Szenen, 1-10 Integer
+- job_ratings: Array mit 3 Ratings [job1, job2, job3]
+- final_ranking: Job-Indices sortiert von BEST zu WORST, z.B. [1, 0, 2] = Job 2 am besten, Job 3 am schlechtesten
 - Narration auf DEUTSCH mit Kanacken-Slang
 - Tempo: 2.5 Woerter pro Sekunde
-- overlay_text: MAX 4 Woerter, CAPS, mit Emoji wenn passend
-- b_roll_keywords: 2 Keywords pro Szene (englisch, fuer Pexels)
-- Alle footage_source auf "pexels" setzen
-- KEINE Apostrophe, KEINE Umlaute (oe/ae/ue statt ö/ä/ü)
-- KEIN sub_shots Array (wird automatisch generiert)
-- Sei SPEZIFISCH — nenne die konkreten Benefits/Anforderungen aus dem Job
+- Sei SPEZIFISCH — zitiere die KONKRETEN Benefits/Anforderungen/Gehalt
 - Mach es PERSOENLICH — "Die wollen X? Bruder, das ist wie..."
+- b_roll_keywords: 2 englische Keywords pro Szene (fuer Pexels Stock)
+- KEINE Umlaute (oe/ae/ue statt oe/ae/ue)
+- KEIN sub_shots Array
 """
+
+
+SCENE_TYPE_MAP = {
+    "COLD_OPEN": "COLD_OPEN",
+    "BRANDED_INTRO": "BRANDED_INTRO",
+    "JOB_REVEAL": "JOB_REVEAL",
+    "TITEL_ROAST": "TITEL_ROAST",
+    "BENEFITS_ROAST": "BENEFITS_ROAST",
+    "ANFORDERUNGEN_ROAST": "ANFORDERUNGEN_ROAST",
+    "GEHALT_ROAST": "GEHALT_ROAST",
+    "RATING": "RATING",
+    "TRANSITION": "TRANSITION",
+    "FINAL_RANKING": "FINAL_RANKING",
+    "OUTRO": "OUTRO",
+    # Common Claude variations
+    "INTRO": "BRANDED_INTRO",
+    "REVEAL": "JOB_REVEAL",
+    "FAZIT": "RATING",
+    "RANKING": "FINAL_RANKING",
+    "COLD_OPENER": "COLD_OPEN",
+}
+
+HIGHLIGHT_MAP = {
+    "TITEL_ROAST": "title",
+    "BENEFITS_ROAST": "benefits",
+    "ANFORDERUNGEN_ROAST": "requirements",
+    "GEHALT_ROAST": "salary",
+}
 
 
 async def generate_roast_script(
@@ -93,7 +181,6 @@ async def generate_roast_script(
     if not settings.anthropic_api_key:
         raise RuntimeError("ANTHROPIC_API_KEY not configured")
 
-    # Format job data for Claude
     jobs_text = ""
     for i, job in enumerate(jobs, 1):
         jobs_text += f"\n--- JOB {i} ---\n"
@@ -103,8 +190,12 @@ async def generate_roast_script(
             jobs_text += f"Standort: {job.location}\n"
         if job.salary:
             jobs_text += f"Gehalt: {job.salary}\n"
+        else:
+            jobs_text += "Gehalt: Nicht angegeben (Verhandlungsbasis)\n"
         if job.benefits:
             jobs_text += f"Benefits: {', '.join(job.benefits)}\n"
+        else:
+            jobs_text += "Benefits: Keine angegeben\n"
         if job.requirements:
             jobs_text += f"Anforderungen: {', '.join(job.requirements)}\n"
         if job.description:
@@ -113,10 +204,10 @@ async def generate_roast_script(
     user_prompt = (
         f"Kategorie: {category}\n"
         f"Hier sind die 3 Jobs zum Roasten:\n{jobs_text}\n\n"
-        f"Generiere den kompletten Roast. Sei BRUTAL und LUSTIG. "
-        f"Jeder Job bekommt ca. 80 Sekunden Roast. "
-        f"Plus Intro (5s), Transitions (3s je), Ranking (15s), Outro (5s). "
-        f"Gesamtdauer ca. 300 Sekunden."
+        f"Generiere den kompletten Roast im Reaction-Video Format. "
+        f"COLD_OPEN + BRANDED_INTRO + 3 Jobs (je JOB_REVEAL, TITEL_ROAST, BENEFITS_ROAST, "
+        f"ANFORDERUNGEN_ROAST, GEHALT_ROAST, RATING) + TRANSITIONS + FINAL_RANKING + OUTRO. "
+        f"Sei BRUTAL und LUSTIG. Gesamtdauer ca. 300 Sekunden."
     )
 
     client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
@@ -158,36 +249,34 @@ def _parse_roast_response(raw: str) -> RoastScriptResponse:
 
     data = json.loads(cleaned)
 
-    # Normalize shot_type values from Claude (e.g. "close" → "close_up")
-    SHOT_TYPE_MAP = {
-        "close": "close_up", "closeup": "close_up", "close-up": "close_up",
-        "wide": "wide", "medium": "medium", "establishing": "establishing",
-        "detail": "detail", "over_shoulder": "over_shoulder",
-        "over-shoulder": "over_shoulder", "pov": "over_shoulder",
-    }
-
     scenes = []
     for s in data.get("scenes", []):
-        raw_shot = s.get("shot_type", "medium").lower().strip()
-        shot_type = SHOT_TYPE_MAP.get(raw_shot, "medium")
+        raw_type = s.get("scene_type", s.get("label", "TRANSITION")).upper().strip()
+        scene_type = SCENE_TYPE_MAP.get(raw_type, "TRANSITION")
 
-        scenes.append(Scene(
+        # Auto-set highlight_section based on scene type
+        highlight = s.get("highlight_section", "").lower().strip()
+        if not highlight:
+            highlight = HIGHLIGHT_MAP.get(scene_type, "")
+
+        scenes.append(RoastScene(
             scene_id=s.get("scene_id", 0),
-            label=s.get("label", ""),
+            scene_type=scene_type,
+            job_index=s.get("job_index", -1),
             narration=s.get("narration", ""),
-            overlay_text=s.get("overlay_text", ""),
-            shot_type=shot_type,
-            visual_prompt=s.get("visual_prompt", ""),
-            b_roll_keywords=s.get("b_roll_keywords", ["office", "corporate"]),
-            footage_source="pexels",
+            overlay_quote=s.get("overlay_quote", ""),
+            highlight_section=highlight,
+            rating=s.get("rating", 0),
             duration=s.get("duration", 5),
+            b_roll_keywords=s.get("b_roll_keywords", ["office", "corporate"]),
         ))
 
     return RoastScriptResponse(
         full_script=data.get("full_script", ""),
-        job_scripts=data.get("job_scripts", []),
+        cold_open_quote=data.get("cold_open_quote", ""),
         scenes=scenes,
-        job_scene_groups=data.get("job_scene_groups", []),
+        job_ratings=data.get("job_ratings", [5, 5, 5]),
+        final_ranking=data.get("final_ranking", [0, 1, 2]),
         estimated_duration=data.get("estimated_duration", 300),
         music_mood=data.get("music_mood", "energetic"),
         thumbnail_text=data.get("thumbnail_text", "JOB ROAST"),

@@ -29,12 +29,12 @@ def _transcribe_sync(audio_path: str) -> list[WordTimestamp]:
     """Synchronous transcription with faster-whisper."""
     from faster_whisper import WhisperModel
 
-    model = WhisperModel("base", device="cpu", compute_type="int8")
+    model = WhisperModel("small", device="cpu", compute_type="int8")
 
     segments, _ = model.transcribe(
         audio_path,
         word_timestamps=True,
-        language="en",
+        language="de",
     )
 
     words: list[WordTimestamp] = []

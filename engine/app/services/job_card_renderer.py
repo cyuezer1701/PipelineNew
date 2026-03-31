@@ -1,177 +1,381 @@
-"""Job Card Renderer — renders job postings as styled PNG images.
+"""Job Card Renderer V4 — Neon dark theme, section highlights, ratings, leaderboard.
 
-Creates LinkedIn/Indeed-style job posting cards with a red "ROAST" stamp overlay.
-Uses Pillow (PIL) for pure-Python image generation (no external API needed).
+Renders multiple card variants per job as PNGs using Pillow:
+- Full card (for JOB_REVEAL scenes)
+- Section-highlighted cards (for TITEL/BENEFITS/ANFORDERUNGEN/GEHALT roasts)
+- Rating card (X/10 Doener graphic)
+- Ranking leaderboard (final ranking screen)
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import uuid
+
+from PIL import Image, ImageDraw, ImageFont
 
 from app.config import settings
 from app.models import JobPosting
 
 logger = logging.getLogger(__name__)
 
+# ── Color Palette (Neon Dark) ────────────────────────────
+BG_COLOR = (13, 13, 13)          # #0D0D0D
+CARD_BG = (26, 26, 46)           # #1A1A2E
+CARD_BORDER = (44, 44, 70)       # #2C2C46
+NEON_RED = (255, 23, 68)         # #FF1744
+NEON_GREEN = (0, 230, 118)       # #00E676
+NEON_YELLOW = (255, 221, 0)      # #FFDD00
+TEXT_WHITE = (255, 255, 255)
+TEXT_DIM = (120, 120, 140)       # #78788C
+TEXT_MUTED = (80, 80, 100)       # #505064
+GOLD = (255, 215, 0)
+SILVER = (192, 192, 192)
+BRONZE = (205, 127, 50)
 
-async def render_job_card(
-    job: JobPosting,
-    width: int = 1400,
-    height: int = 800,
-) -> str:
-    """Render a job posting as a styled PNG card image."""
-    import asyncio
-    return await asyncio.get_event_loop().run_in_executor(
-        None, _render_card_sync, job, width, height
+# ── Font Loading ─────────────────────────────────────────
+FONT_BOLD = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+FONT_REGULAR = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+
+
+def _font(path: str, size: int) -> ImageFont.FreeTypeFont:
+    try:
+        return ImageFont.truetype(path, size)
+    except OSError:
+        return ImageFont.load_default()
+
+
+# ── Shared Helpers ───────────────────────────────────────
+
+def _draw_rounded_rect(draw: ImageDraw.Draw, rect: tuple, fill: tuple,
+                        radius: int = 20, outline: tuple | None = None) -> None:
+    draw.rounded_rectangle(rect, radius=radius, fill=fill, outline=outline)
+
+
+def _wrap_text(text: str, font: ImageFont.FreeTypeFont, max_width: int) -> list[str]:
+    words = text.split()
+    lines, current = [], ""
+    for word in words:
+        test = f"{current} {word}".strip()
+        bbox = font.getbbox(test)
+        if bbox[2] <= max_width:
+            current = test
+        else:
+            if current:
+                lines.append(current)
+            current = word
+    if current:
+        lines.append(current)
+    return lines or [text]
+
+
+def _company_color(company: str) -> tuple:
+    colors = [
+        (66, 133, 244), (234, 67, 53), (251, 188, 4), (52, 168, 83),
+        (171, 71, 188), (255, 112, 67), (0, 172, 193), (124, 179, 66),
+    ]
+    h = int(hashlib.md5(company.encode()).hexdigest()[:8], 16)
+    return colors[h % len(colors)]
+
+
+# ── Full Job Card ────────────────────────────────────────
+
+async def render_job_card(job: JobPosting) -> str:
+    """Render the full job card (no highlights). Used for JOB_REVEAL."""
+    return _render_card(job, highlight_section="")
+
+
+async def render_job_card_highlighted(job: JobPosting, section: str) -> str:
+    """Render card with one section highlighted red, others dimmed."""
+    return _render_card(job, highlight_section=section)
+
+
+def _render_card(job: JobPosting, highlight_section: str = "",
+                 width: int = 1600, height: int = 1000) -> str:
+    """Core card renderer with optional section highlighting."""
+    img = Image.new("RGBA", (width, height), (*BG_COLOR, 255))
+    draw = ImageDraw.Draw(img)
+    margin = 50
+    card_x0, card_y0 = margin, margin
+    card_x1, card_y1 = width - margin, height - margin
+
+    # Card background
+    _draw_rounded_rect(draw, (card_x0, card_y0, card_x1, card_y1),
+                        fill=(*CARD_BG, 230), radius=24, outline=(*CARD_BORDER, 255))
+
+    inner_left = card_x0 + 40
+    inner_right = card_x1 - 40
+
+    # ── Company header ──
+    color = _company_color(job.company)
+    cx, cy = inner_left + 30, card_y0 + 60
+    draw.ellipse([cx - 25, cy - 25, cx + 25, cy + 25], fill=color)
+    initial_font = _font(FONT_BOLD, 28)
+    initial = job.company[0].upper() if job.company else "?"
+    bbox = initial_font.getbbox(initial)
+    draw.text((cx - bbox[2] // 2, cy - bbox[3] // 2 - 2), initial,
+              font=initial_font, fill=TEXT_WHITE)
+
+    company_font = _font(FONT_REGULAR, 24)
+    draw.text((inner_left + 70, card_y0 + 38), job.company,
+              font=company_font, fill=TEXT_WHITE if highlight_section == "" else TEXT_DIM)
+    if job.location:
+        loc_font = _font(FONT_REGULAR, 20)
+        draw.text((inner_left + 70, card_y0 + 68), job.location,
+                  font=loc_font, fill=TEXT_DIM)
+
+    # Section Y positions (relative to card_y0)
+    title_y = card_y0 + 140
+    salary_y = card_y0 + 280
+    benefits_y = card_y0 + 370
+    req_y = card_y0 + 600
+
+    # ── Title Section ──
+    title_active = highlight_section in ("", "title")
+    title_color = TEXT_WHITE if title_active else TEXT_MUTED
+    title_font = _font(FONT_BOLD, 42)
+    lines = _wrap_text(job.title, title_font, inner_right - inner_left)
+    for i, line in enumerate(lines[:2]):
+        draw.text((inner_left, title_y + i * 52), line,
+                  font=title_font, fill=title_color)
+    title_end = title_y + len(lines[:2]) * 52 + 10
+
+    if highlight_section == "title":
+        _draw_highlight_border(draw, inner_left - 10, title_y - 10,
+                               inner_right + 10, title_end)
+
+    # ── Salary Section ──
+    salary_active = highlight_section in ("", "salary")
+    salary_font = _font(FONT_BOLD, 34)
+    if job.salary:
+        salary_color = NEON_GREEN if salary_active else TEXT_MUTED
+        draw.text((inner_left, salary_y), f"Gehalt: {job.salary}",
+                  font=salary_font, fill=salary_color)
+    else:
+        salary_color = NEON_RED if salary_active else TEXT_MUTED
+        draw.text((inner_left, salary_y), "Gehalt: Nicht angegeben",
+                  font=salary_font, fill=salary_color)
+
+    if highlight_section == "salary":
+        _draw_highlight_border(draw, inner_left - 10, salary_y - 10,
+                               inner_right + 10, salary_y + 44)
+
+    # ── Benefits Section ──
+    benefits_active = highlight_section in ("", "benefits")
+    section_font = _font(FONT_BOLD, 22)
+    label_color = NEON_GREEN if benefits_active else TEXT_MUTED
+    draw.text((inner_left, benefits_y), "BENEFITS", font=section_font, fill=label_color)
+
+    tag_font = _font(FONT_REGULAR, 22)
+    tag_x, tag_y = inner_left, benefits_y + 35
+    for benefit in job.benefits[:8]:
+        text_w = tag_font.getbbox(benefit)[2] + 24
+        if tag_x + text_w > inner_right:
+            tag_x = inner_left
+            tag_y += 40
+        pill_color = (30, 80, 50) if benefits_active else (40, 40, 50)
+        text_color = NEON_GREEN if benefits_active else TEXT_MUTED
+        _draw_rounded_rect(draw, (tag_x, tag_y, tag_x + text_w, tag_y + 32),
+                            fill=pill_color, radius=16)
+        draw.text((tag_x + 12, tag_y + 4), benefit, font=tag_font, fill=text_color)
+        tag_x += text_w + 10
+    benefits_end = tag_y + 50
+
+    if highlight_section == "benefits":
+        _draw_highlight_border(draw, inner_left - 10, benefits_y - 10,
+                               inner_right + 10, benefits_end)
+
+    # ── Requirements Section ──
+    req_active = highlight_section in ("", "requirements")
+    label_color = NEON_RED if req_active else TEXT_MUTED
+    draw.text((inner_left, req_y), "ANFORDERUNGEN", font=section_font, fill=label_color)
+
+    req_font = _font(FONT_REGULAR, 22)
+    ry = req_y + 35
+    for req in job.requirements[:5]:
+        bullet_color = TEXT_WHITE if req_active else TEXT_MUTED
+        wrapped = _wrap_text(req, req_font, inner_right - inner_left - 30)
+        for line in wrapped[:2]:
+            draw.text((inner_left + 20, ry), f"\u2022 {line}",
+                      font=req_font, fill=bullet_color)
+            ry += 30
+    req_end = ry + 10
+
+    if highlight_section == "requirements":
+        _draw_highlight_border(draw, inner_left - 10, req_y - 10,
+                               inner_right + 10, req_end)
+
+    out = os.path.join(settings.output_dir, f"card_{uuid.uuid4().hex[:8]}.png")
+    img.save(out, "PNG")
+    logger.info("Rendered job card: %s (highlight=%s)", out, highlight_section or "none")
+    return out
+
+
+def _draw_highlight_border(draw: ImageDraw.Draw, x0: int, y0: int,
+                           x1: int, y1: int) -> None:
+    """Draw neon red glow border around a section."""
+    for i, alpha in enumerate([40, 70, 120]):
+        offset = (3 - i) * 3
+        draw.rounded_rectangle(
+            (x0 - offset, y0 - offset, x1 + offset, y1 + offset),
+            radius=12, outline=(*NEON_RED, alpha), width=2,
+        )
+    draw.rounded_rectangle(
+        (x0, y0, x1, y1), radius=8,
+        outline=(*NEON_RED, 200), width=3,
     )
 
 
-def _render_card_sync(job: JobPosting, width: int, height: int) -> str:
-    """Synchronous card rendering with Pillow."""
-    from PIL import Image, ImageDraw, ImageFont
+# ── Rating Card ──────────────────────────────────────────
 
-    # Create canvas
-    img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+async def render_rating_card(job: JobPosting, rating: int) -> str:
+    """Render X/10 Doener rating graphic."""
+    width, height = 1400, 900
+    img = Image.new("RGBA", (width, height), (*BG_COLOR, 255))
     draw = ImageDraw.Draw(img)
 
-    # Card background (LinkedIn-style light gray with rounded corners)
-    card_margin = 40
-    card_rect = [card_margin, card_margin, width - card_margin, height - card_margin]
-    _draw_rounded_rect(draw, card_rect, radius=20, fill=(39, 39, 41, 230))  # Dark mode card
+    _draw_rounded_rect(draw, (40, 40, width - 40, height - 40),
+                        fill=(*CARD_BG, 230), radius=24)
 
-    # Fonts (use system DejaVu since it's installed in Docker)
-    font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
-    font_path_regular = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+    # Job title (smaller, top)
+    title_font = _font(FONT_REGULAR, 28)
+    lines = _wrap_text(f"{job.company} \u2014 {job.title}", title_font, width - 160)
+    for i, line in enumerate(lines[:2]):
+        bbox = title_font.getbbox(line)
+        x = (width - bbox[2]) // 2
+        draw.text((x, 80 + i * 36), line, font=title_font, fill=TEXT_DIM)
 
-    try:
-        font_title = ImageFont.truetype(font_path, 36)
-        font_company = ImageFont.truetype(font_path_regular, 24)
-        font_body = ImageFont.truetype(font_path_regular, 22)
-        font_tag = ImageFont.truetype(font_path, 18)
-        font_salary = ImageFont.truetype(font_path, 32)
-        font_stamp = ImageFont.truetype(font_path, 72)
-    except OSError:
-        font_title = ImageFont.load_default()
-        font_company = font_title
-        font_body = font_title
-        font_tag = font_title
-        font_salary = font_title
-        font_stamp = font_title
+    # Big rating number
+    rating_color = NEON_GREEN if rating >= 7 else NEON_YELLOW if rating >= 4 else NEON_RED
+    big_font = _font(FONT_BOLD, 180)
+    rating_text = f"{rating}/10"
+    bbox = big_font.getbbox(rating_text)
+    rx = (width - bbox[2]) // 2
+    draw.text((rx, 200), rating_text, font=big_font, fill=rating_color)
 
-    x_start = card_margin + 40
-    y = card_margin + 40
+    # Doener dots
+    dot_size = 40
+    dot_gap = 16
+    total_w = 10 * dot_size + 9 * dot_gap
+    start_x = (width - total_w) // 2
+    dot_y = 460
 
-    # Company logo placeholder (colored circle with initial)
-    logo_size = 50
-    logo_color = _company_color(job.company)
-    draw.ellipse([x_start, y, x_start + logo_size, y + logo_size], fill=logo_color)
-    initial = job.company[0].upper() if job.company else "?"
-    bbox = draw.textbbox((0, 0), initial, font=font_title)
-    iw, ih = bbox[2] - bbox[0], bbox[3] - bbox[1]
-    draw.text((x_start + (logo_size - iw) // 2, y + (logo_size - ih) // 2 - 4),
-              initial, fill=(255, 255, 255), font=font_title)
-
-    # Company name + location
-    text_x = x_start + logo_size + 20
-    draw.text((text_x, y), job.company, fill=(180, 180, 185), font=font_company)
-    y += 30
-    if job.location:
-        draw.text((text_x, y), job.location, fill=(130, 131, 132), font=font_body)
-    y += 50
-
-    # Job title
-    title_wrapped = _wrap_text(job.title, font_title, width - 2 * (card_margin + 40) - 20, draw)
-    for line in title_wrapped[:2]:
-        draw.text((x_start, y), line, fill=(255, 255, 255), font=font_title)
-        y += 44
-    y += 15
-
-    # Salary (if available)
-    if job.salary:
-        draw.text((x_start, y), job.salary, fill=(76, 175, 80), font=font_salary)
-        y += 50
-    else:
-        draw.text((x_start, y), "Gehalt: Verhandlungsbasis", fill=(255, 100, 100), font=font_company)
-        y += 40
-
-    # Benefits as pills/tags
-    if job.benefits:
-        tag_x = x_start
-        y += 10
-        for benefit in job.benefits[:6]:
-            tag_w = draw.textlength(benefit, font=font_tag) + 24
-            if tag_x + tag_w > width - card_margin - 40:
-                tag_x = x_start
-                y += 38
-            # Green pill background
-            _draw_rounded_rect(draw, [tag_x, y, tag_x + tag_w, y + 30],
-                             radius=15, fill=(30, 70, 32, 200))
-            draw.text((tag_x + 12, y + 4), benefit, fill=(130, 220, 130), font=font_tag)
-            tag_x += tag_w + 10
-        y += 45
-
-    # Requirements (bullet points)
-    if job.requirements:
-        y += 5
-        draw.text((x_start, y), "Anforderungen:", fill=(150, 150, 155), font=font_company)
-        y += 32
-        for req in job.requirements[:4]:
-            req_text = f"  •  {req}"
-            req_wrapped = _wrap_text(req_text, font_body, width - 2 * (card_margin + 40) - 20, draw)
-            for line in req_wrapped[:1]:
-                draw.text((x_start, y), line, fill=(200, 200, 205), font=font_body)
-                y += 28
-
-    # Red "ROAST" stamp (diagonal, semi-transparent)
-    stamp_img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-    stamp_draw = ImageDraw.Draw(stamp_img)
-    stamp_draw.text((width // 2 - 120, height // 2 - 80), "ROAST",
-                    fill=(255, 40, 40, 90), font=font_stamp)
-    stamp_rotated = stamp_img.rotate(-25, expand=False, center=(width // 2, height // 2))
-    img = Image.alpha_composite(img, stamp_rotated)
-
-    # Save
-    output_path = os.path.join(settings.output_dir, f"jobcard_{uuid.uuid4().hex[:8]}.png")
-    img.save(output_path, "PNG")
-
-    logger.info("Job card rendered: %s (%s at %s)", output_path, job.title, job.company)
-    return output_path
-
-
-def _draw_rounded_rect(draw, rect, radius, fill):
-    """Draw a rounded rectangle."""
-    x1, y1, x2, y2 = rect
-    draw.rectangle([x1 + radius, y1, x2 - radius, y2], fill=fill)
-    draw.rectangle([x1, y1 + radius, x2, y2 - radius], fill=fill)
-    draw.pieslice([x1, y1, x1 + 2 * radius, y1 + 2 * radius], 180, 270, fill=fill)
-    draw.pieslice([x2 - 2 * radius, y1, x2, y1 + 2 * radius], 270, 360, fill=fill)
-    draw.pieslice([x1, y2 - 2 * radius, x1 + 2 * radius, y2], 90, 180, fill=fill)
-    draw.pieslice([x2 - 2 * radius, y2 - 2 * radius, x2, y2], 0, 90, fill=fill)
-
-
-def _company_color(name: str) -> tuple:
-    """Generate a consistent color from company name."""
-    colors = [
-        (66, 133, 244), (219, 68, 55), (244, 180, 0), (15, 157, 88),
-        (171, 71, 188), (0, 172, 193), (255, 112, 67), (92, 107, 192),
-    ]
-    return colors[hash(name) % len(colors)]
-
-
-def _wrap_text(text: str, font, max_width: float, draw) -> list[str]:
-    """Wrap text to fit within max_width."""
-    words = text.split()
-    lines = []
-    current_line = ""
-    for word in words:
-        test = f"{current_line} {word}".strip()
-        if draw.textlength(test, font=font) <= max_width:
-            current_line = test
+    for i in range(10):
+        x = start_x + i * (dot_size + dot_gap)
+        if i < rating:
+            draw.ellipse([x, dot_y, x + dot_size, dot_y + dot_size],
+                         fill=rating_color)
         else:
-            if current_line:
-                lines.append(current_line)
-            current_line = word
-    if current_line:
-        lines.append(current_line)
-    return lines
+            draw.ellipse([x, dot_y, x + dot_size, dot_y + dot_size],
+                         fill=(50, 50, 60), outline=(70, 70, 80))
+
+    label_font = _font(FONT_BOLD, 36)
+    bbox = label_font.getbbox("DOENER")
+    draw.text(((width - bbox[2]) // 2, dot_y + dot_size + 30),
+              "DOENER", font=label_font, fill=TEXT_DIM)
+
+    # Verdict
+    if rating <= 3:
+        verdict = "Wallah traurig. Finger weg Bruder."
+    elif rating <= 5:
+        verdict = "Mittelmaessig. Kannste machen, musste aber nicht."
+    elif rating <= 7:
+        verdict = "Geht klar. Nicht schlecht, nicht geil."
+    else:
+        verdict = "Mashallah! Solider Job Bruder."
+    verdict_font = _font(FONT_REGULAR, 28)
+    bbox = verdict_font.getbbox(verdict)
+    draw.text(((width - bbox[2]) // 2, 620), verdict, font=verdict_font, fill=TEXT_WHITE)
+
+    sub_font = _font(FONT_REGULAR, 24)
+    sub = f"{rating} von 10 Doenern"
+    bbox = sub_font.getbbox(sub)
+    draw.text(((width - bbox[2]) // 2, height - 120), sub, font=sub_font, fill=rating_color)
+
+    out = os.path.join(settings.output_dir, f"rating_{uuid.uuid4().hex[:8]}.png")
+    img.save(out, "PNG")
+    logger.info("Rendered rating card: %s (%d/10)", out, rating)
+    return out
+
+
+# ── Ranking Leaderboard ──────────────────────────────────
+
+async def render_ranking_leaderboard(
+    jobs: list[JobPosting],
+    ratings: list[int],
+    ranking_order: list[int],
+) -> str:
+    """Render final ranking screen (1920x1080, full-screen graphic)."""
+    width, height = 1920, 1080
+    img = Image.new("RGBA", (width, height), (*BG_COLOR, 255))
+    draw = ImageDraw.Draw(img)
+
+    # Header
+    header_font = _font(FONT_BOLD, 72)
+    header = "FINAL RANKING"
+    bbox = header_font.getbbox(header)
+    draw.text(((width - bbox[2]) // 2, 60), header, font=header_font, fill=NEON_RED)
+
+    sub_font = _font(FONT_REGULAR, 28)
+    sub = "Vom Besten zum Schlechtesten"
+    bbox = sub_font.getbbox(sub)
+    draw.text(((width - bbox[2]) // 2, 150), sub, font=sub_font, fill=TEXT_DIM)
+
+    rank_colors = [NEON_GREEN, NEON_YELLOW, NEON_RED]
+    medal_colors = [GOLD, SILVER, BRONZE]
+    row_height = 220
+    start_y = 240
+
+    for rank_pos, job_idx in enumerate(ranking_order[:3]):
+        if job_idx >= len(jobs):
+            continue
+        job = jobs[job_idx]
+        rating = ratings[job_idx] if job_idx < len(ratings) else 5
+
+        y = start_y + rank_pos * row_height
+
+        _draw_rounded_rect(draw, (100, y, width - 100, y + row_height - 20),
+                            fill=(*CARD_BG, 200), radius=16,
+                            outline=(*rank_colors[rank_pos], 100))
+
+        # Rank number
+        rank_font = _font(FONT_BOLD, 80)
+        draw.text((140, y + 50), f"#{rank_pos + 1}",
+                  font=rank_font, fill=medal_colors[rank_pos])
+
+        # Company circle
+        cc = _company_color(job.company)
+        ccx = 360
+        ccy = y + row_height // 2 - 10
+        draw.ellipse([ccx - 35, ccy - 35, ccx + 35, ccy + 35], fill=cc)
+        init_font = _font(FONT_BOLD, 32)
+        init = job.company[0].upper()
+        ibbox = init_font.getbbox(init)
+        draw.text((ccx - ibbox[2] // 2, ccy - ibbox[3] // 2 - 2), init,
+                  font=init_font, fill=TEXT_WHITE)
+
+        # Job info
+        company_font = _font(FONT_BOLD, 32)
+        title_font = _font(FONT_REGULAR, 26)
+        draw.text((420, y + 40), job.company, font=company_font, fill=TEXT_WHITE)
+        title_lines = _wrap_text(job.title, title_font, 800)
+        draw.text((420, y + 82), title_lines[0], font=title_font, fill=TEXT_DIM)
+
+        # Rating on right
+        r_font = _font(FONT_BOLD, 64)
+        r_text = f"{rating}/10"
+        r_color = NEON_GREEN if rating >= 7 else NEON_YELLOW if rating >= 4 else NEON_RED
+        rbbox = r_font.getbbox(r_text)
+        draw.text((width - 250 - rbbox[2] // 2, y + 55), r_text,
+                  font=r_font, fill=r_color)
+
+        d_font = _font(FONT_REGULAR, 20)
+        dbbox = d_font.getbbox("DOENER")
+        draw.text((width - 250 - dbbox[2] // 2, y + 135), "DOENER",
+                  font=d_font, fill=TEXT_DIM)
+
+    out = os.path.join(settings.output_dir, f"ranking_{uuid.uuid4().hex[:8]}.png")
+    img.save(out, "PNG")
+    logger.info("Rendered ranking leaderboard: %s", out)
+    return out

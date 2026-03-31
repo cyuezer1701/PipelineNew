@@ -122,6 +122,20 @@ class JobResponse(BaseModel):
 
 # ── Job Roast Models ──────────────────────────────────────
 
+class RoastSceneType(str, Enum):
+    COLD_OPEN = "COLD_OPEN"
+    BRANDED_INTRO = "BRANDED_INTRO"
+    JOB_REVEAL = "JOB_REVEAL"
+    TITEL_ROAST = "TITEL_ROAST"
+    BENEFITS_ROAST = "BENEFITS_ROAST"
+    ANFORDERUNGEN_ROAST = "ANFORDERUNGEN_ROAST"
+    GEHALT_ROAST = "GEHALT_ROAST"
+    RATING = "RATING"
+    TRANSITION = "TRANSITION"
+    FINAL_RANKING = "FINAL_RANKING"
+    OUTRO = "OUTRO"
+
+
 class JobPosting(BaseModel):
     """A single job posting to be roasted."""
     title: str = Field(..., description="Job title, e.g. 'Senior Full-Stack Developer (m/w/d)'")
@@ -133,24 +147,37 @@ class JobPosting(BaseModel):
     description: str = ""
 
 
+class RoastScene(BaseModel):
+    """A single scene in the roast video with typed metadata."""
+    scene_id: int = 0
+    scene_type: RoastSceneType = RoastSceneType.TRANSITION
+    job_index: int = -1  # Which job (0,1,2) or -1 for non-job scenes
+    narration: str = ""
+    overlay_quote: str = ""  # Big roast quote overlay (max 6 words, CAPS)
+    highlight_section: str = ""  # "title", "benefits", "requirements", "salary", ""
+    rating: int = 0  # X/10 doener rating (only for RATING scenes)
+    duration: float = 5.0
+    b_roll_keywords: list[str] = Field(default_factory=list)
+
+
 class RoastRequest(BaseModel):
     """Request to generate a job roast video."""
     jobs: list[JobPosting] = Field(..., description="3 job postings to roast")
     category: str = Field(default="Die schlimmsten Stellenanzeigen", description="Video category/theme")
     upload: bool = False
-    upload_shorts: bool = False
     youtube_title: Optional[str] = None
     youtube_description: Optional[str] = None
     youtube_tags: list[str] = Field(default_factory=list)
 
 
 class RoastScriptResponse(BaseModel):
-    """Roast script with grouped scenes per job."""
+    """Roast script with scene structure for V4 pipeline."""
     full_script: str
-    job_scripts: list[str]  # Individual narration per job (for Shorts)
-    scenes: list[Scene]  # All scenes (intro + jobs + transitions + outro)
-    job_scene_groups: list[list[int]]  # Scene indices per job [[0,1,2],[3,4,5],[6,7,8]]
-    estimated_duration: int
+    cold_open_quote: str = ""  # Most shocking quote for hook
+    scenes: list[RoastScene]
+    job_ratings: list[int] = Field(default_factory=list)  # [7, 3, 5] per job
+    final_ranking: list[int] = Field(default_factory=list)  # Job indices ranked [2, 0, 1]
+    estimated_duration: int = 300
     music_mood: str = "energetic"
     thumbnail_text: str = ""
 

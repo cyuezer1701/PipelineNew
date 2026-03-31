@@ -17,7 +17,7 @@ import random
 import uuid
 
 from app.config import settings
-from app.models import Scene, ShotType, SubShot, WordTimestamp
+from app.models import RoastScene, RoastSceneType, Scene, ShotType, SubShot, WordTimestamp
 
 logger = logging.getLogger(__name__)
 
@@ -624,40 +624,90 @@ def _safe_remove(path: str) -> None:
         pass
 
 
-# ── Roast Scene Renderer ──────────────────────────────────
+# ══════════════════════════════════════════════════════════
+# ══ ROAST V4 — Split-Screen Reaction-Video Pipeline ══════
+# ══════════════════════════════════════════════════════════
 
-async def render_roast_scene(
+ROAST_TRANSITION_MAP = {
+    "JOB_REVEAL": ["fade", "fadeblack"],
+    "TITEL_ROAST": ["smoothdown", "fade"],
+    "BENEFITS_ROAST": ["slideright", "fade"],
+    "ANFORDERUNGEN_ROAST": ["slideleft", "fade"],
+    "GEHALT_ROAST": ["smoothup", "fade"],
+    "RATING": ["circlecrop", "fade"],
+    "TRANSITION": ["fadeblack"],
+    "FINAL_RANKING": ["fadeblack"],
+    "COLD_OPEN": ["fade"],
+    "BRANDED_INTRO": ["fade"],
+    "OUTRO": ["fade"],
+}
+
+
+async def render_roast_scene_v2(
     clip: str,
-    card_image: str,
-    scene: Scene,
+    card_png: str,
+    scene: RoastScene,
     output_path: str,
     w: int = 1920,
     h: int = 1080,
 ) -> None:
-    """Render a scene with a job card PNG overlaid on background footage."""
+    """Render a split-screen roast scene: card left 55%, footage right 45%.
+
+    The job card is the primary visual element. Stock footage is atmosphere only.
+    Overlay quote appears as big yellow text on the footage side.
+    """
     dur = scene.duration
-    src_w, src_h = int(w * 1.15), int(h * 1.15)
+    card_w = int(w * 0.55)
+    footage_w = w - card_w
+    src_w, src_h = int(footage_w * 1.3), int(h * 1.3)
 
     transform = random.choice(["zoom_in", "pan_left", "pan_right", "dolly"])
-    tf = _get_transform(transform, dur, w, h)
+    tf = _get_transform(transform, dur, footage_w, h)
 
-    card_w = int(w * 0.7)
+    # Build filter_complex
+    filters = (
+        # Stock footage: right 45%, dimmed, color graded
+        f"[0:v]trim=0:{dur},setpts=PTS-STARTPTS,"
+        f"scale={src_w}:{src_h}:force_original_aspect_ratio=decrease,"
+        f"pad={src_w}:{src_h}:(ow-iw)/2:(oh-ih)/2,setsar=1,"
+        f"{COLOR_GRADE},{tf},"
+        f"settb=AVTB,setpts=N/25/TB,fps=25,"
+        f"crop={footage_w}:{h}:(iw-{footage_w})/2:0,"
+        f"eq=brightness=-0.15[footage];"
+        # Card PNG: left 55%
+        f"[1:v]scale={card_w}:{h}:force_original_aspect_ratio=decrease,"
+        f"pad={card_w}:{h}:(ow-iw)/2:(oh-ih)/2:color=0x0D0D0D,format=rgba,"
+        f"fade=t=in:st=0:d=0.5:alpha=1[card];"
+        # Dark background
+        f"color=c=0x0D0D0D:s={w}x{h}:d={dur}:r=25[base];"
+        # Compose: base + card (left) + footage (right)
+        f"[base][card]overlay=0:0:shortest=1[wcard];"
+        f"[wcard][footage]overlay={card_w}:0:shortest=1"
+    )
+
+    # Add overlay quote as big yellow text on the footage side
+    if scene.overlay_quote:
+        quote = _esc(scene.overlay_quote)
+        quote_x = card_w + 40
+        quote_max_w = footage_w - 80
+        filters += (
+            f"[quotebase];"
+            f"[quotebase]drawtext=fontfile={FONT_PATH}:text='{quote}'"
+            f":fontsize=54:fontcolor=0xFFDD00:borderw=5:bordercolor=0xFF1744"
+            f":x={quote_x}+(({quote_max_w}-text_w)/2)"
+            f":y=(h-text_h)/2"
+            f":enable='between(t,0.8,{dur - 0.3})'"
+            f":alpha='if(lt(t,1.1),(t-0.8)/0.3,if(gt(t,{dur - 0.6}),({dur - 0.3}-t)/0.3,1))'"
+        )
+        filters += "[outv]"
+    else:
+        filters += "[outv]"
 
     cmd = [
         "ffmpeg", "-y",
         "-i", clip,
-        "-i", card_image,
-        "-filter_complex", (
-            f"[0:v]trim=0:{dur},setpts=PTS-STARTPTS,"
-            f"scale={src_w}:{src_h}:force_original_aspect_ratio=decrease,"
-            f"pad={src_w}:{src_h}:(ow-iw)/2:(oh-ih)/2,setsar=1,"
-            f"{COLOR_GRADE},{tf},"
-            f"settb=AVTB,setpts=N/25/TB,fps=25[bg];"
-            f"[1:v]scale={card_w}:-1,format=rgba,"
-            f"fade=t=in:st=0:d=0.5:alpha=1,"
-            f"fade=t=out:st={max(0, dur - 0.5)}:d=0.5:alpha=1[card];"
-            f"[bg][card]overlay=(W-w)/2:(H-h)/2:shortest=1[outv]"
-        ),
+        "-i", card_png,
+        "-filter_complex", filters,
         "-map", "[outv]",
         "-t", str(dur),
         "-c:v", "libx264", "-preset", "fast", "-crf", "19",
@@ -666,9 +716,134 @@ async def render_roast_scene(
     await _run_ffmpeg(cmd)
 
 
-async def render_roast_compilation(
+async def render_roast_fullscreen(
+    image_png: str,
+    scene: RoastScene,
+    output_path: str,
+    w: int = 1920,
+    h: int = 1080,
+) -> None:
+    """Render a full-screen scene from a single PNG (rating, ranking)."""
+    dur = scene.duration
+    cmd = [
+        "ffmpeg", "-y",
+        "-loop", "1", "-t", str(dur), "-i", image_png,
+        "-vf", (
+            f"scale={w}:{h}:force_original_aspect_ratio=decrease,"
+            f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color=0x0D0D0D,"
+            f"format=yuv420p,"
+            f"fade=t=in:st=0:d=0.4,fade=t=out:st={max(0, dur - 0.4)}:d=0.4,"
+            f"settb=AVTB,setpts=N/25/TB,fps=25"
+        ),
+        "-c:v", "libx264", "-preset", "fast", "-crf", "19",
+        "-pix_fmt", "yuv420p", "-an", output_path,
+    ]
+    await _run_ffmpeg(cmd)
+
+
+async def _render_roast_cold_open(
+    quote: str, output_path: str, w: int = 1920, h: int = 1080,
+) -> None:
+    """5s cold open: shocking quote slams onto black screen with red glow."""
+    escaped = _esc(quote)
+    cmd = [
+        "ffmpeg", "-y",
+        "-f", "lavfi", "-i", f"color=c=0x0D0D0D:s={w}x{h}:d=5:r=25",
+        "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo",
+        "-t", "5",
+        "-vf", (
+            f"vignette=PI/4,"
+            # Red glow shadow
+            f"drawtext=fontfile={FONT_PATH}:text='{escaped}'"
+            f":fontsize=72:fontcolor=0xFF1744@0.4"
+            f":borderw=8:bordercolor=0xFF1744@0.2"
+            f":x=(w-text_w)/2:y=(h-text_h)/2"
+            f":alpha='if(lt(t,0.4),t/0.4,1)',"
+            # Main white text
+            f"drawtext=fontfile={FONT_PATH}:text='{escaped}'"
+            f":fontsize=72:fontcolor=white"
+            f":borderw=3:bordercolor=0xFF1744"
+            f":x=(w-text_w)/2:y=(h-text_h)/2"
+            f":alpha='if(lt(t,0.3),t/0.3,if(gt(t,4.5),(5-t)/0.5,1))'"
+        ),
+        "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+        "-c:a", "aac", "-b:a", "128k",
+        "-pix_fmt", "yuv420p", "-shortest", output_path,
+    ]
+    await _run_ffmpeg(cmd)
+
+
+async def _render_roast_intro(output_path: str, w: int = 1920, h: int = 1080) -> None:
+    """5s branded intro: JOB ROAST neon red on dark background."""
+    name = _esc(settings.roast_channel_name)
+    tagline = _esc(settings.roast_channel_tagline)
+    cmd = [
+        "ffmpeg", "-y",
+        "-f", "lavfi", "-i", f"color=c=0x0D0D0D:s={w}x{h}:d=5:r=25",
+        "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo",
+        "-t", "5",
+        "-vf", (
+            f"vignette=PI/3,"
+            # Red glow behind title
+            f"drawtext=fontfile={FONT_PATH}:text='{name}'"
+            f":fontsize=100:fontcolor=0xFF1744@0.35"
+            f":borderw=12:bordercolor=0xFF1744@0.15"
+            f":x=(w-text_w)/2:y=(h-text_h)/2-40"
+            f":alpha='min(1,t/0.3)',"
+            # Main title
+            f"drawtext=fontfile={FONT_PATH}:text='{name}'"
+            f":fontsize=100:fontcolor=white"
+            f":borderw=3:bordercolor=0xFF1744"
+            f":x=(w-text_w)/2:y=(h-text_h)/2-40"
+            f":alpha='min(1,t/0.25)',"
+            # Tagline
+            f"drawtext=fontfile={FONT_PATH}:text='{tagline}'"
+            f":fontsize=28:fontcolor=0x8899CC"
+            f":x=(w-text_w)/2:y=(h/2)+50"
+            f":alpha='if(lt(t,0.5),0,min(1,(t-0.5)/0.3))'"
+        ),
+        "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+        "-c:a", "aac", "-b:a", "128k",
+        "-pix_fmt", "yuv420p", "-shortest", output_path,
+    ]
+    await _run_ffmpeg(cmd)
+
+
+async def _render_roast_outro(output_path: str, w: int = 1920, h: int = 1080) -> None:
+    """5s outro: ABONNIERT CTA in German with roast branding."""
+    name = _esc(settings.roast_channel_name)
+    cmd = [
+        "ffmpeg", "-y",
+        "-f", "lavfi", "-i", f"color=c=0x0D0D0D:s={w}x{h}:d=5:r=25",
+        "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo",
+        "-t", "5",
+        "-vf", (
+            f"vignette=PI/3,"
+            f"drawtext=fontfile={FONT_PATH}:text='ABONNIERT'"
+            f":fontsize=80:fontcolor=0xFF1744@0.3"
+            f":x=(w-text_w)/2:y=(h/2)-60:alpha='min(1,t/0.3)',"
+            f"drawtext=fontfile={FONT_PATH}:text='ABONNIERT'"
+            f":fontsize=80:fontcolor=0xFF4444:borderw=2:bordercolor=0x880000"
+            f":x=(w-text_w)/2:y=(h/2)-60:alpha='min(1,t/0.3)',"
+            f"drawtext=fontfile={FONT_PATH}:text='{name}'"
+            f":fontsize=44:fontcolor=white"
+            f":x=(w-text_w)/2:y=(h/2)+40"
+            f":alpha='if(lt(t,0.4),0,min(1,(t-0.4)/0.3))',"
+            f"drawtext=fontfile={FONT_PATH}:text='Jeden Tag neue Roasts wallah'"
+            f":fontsize=24:fontcolor=0x8899CC"
+            f":x=(w-text_w)/2:y=(h/2)+100"
+            f":alpha='if(lt(t,0.8),0,min(1,(t-0.8)/0.4))'"
+        ),
+        "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+        "-c:a", "aac", "-b:a", "128k",
+        "-pix_fmt", "yuv420p", "-shortest", output_path,
+    ]
+    await _run_ffmpeg(cmd)
+
+
+async def render_roast_compilation_v2(
     scene_files: list[str],
-    scenes: list[Scene],
+    scenes: list[RoastScene],
     audio_path: str,
     captions: list[WordTimestamp] | None,
     music_path: str | None,
@@ -677,41 +852,52 @@ async def render_roast_compilation(
     w: int = 1920,
     h: int = 1080,
 ) -> str:
-    """Assemble roast scenes into a final compilation video."""
+    """Assemble V4 roast: concat all pre-rendered scenes + captions + audio."""
     job_id = uuid.uuid4().hex[:8]
     output_path = os.path.join(settings.output_dir, f"roast_{job_id}.mp4")
     tmp_files = []
 
-    # Concat scenes with transitions
+    # Concat all scene files (cold open, intro, job scenes, ranking, outro already rendered)
     if len(scene_files) == 1:
         main_path = scene_files[0]
     else:
         main_path = os.path.join(settings.output_dir, f"rmain_{job_id}.mp4")
         tmp_files.append(main_path)
-        await _concat_with_transitions(scene_files, scenes, main_path, target_duration)
+        # Use simple concat (scenes already have correct timing)
+        await _concat_segments(scene_files, main_path)
 
-    # Text overlays (captions + section labels)
-    text_path = os.path.join(settings.output_dir, f"rtext_{job_id}.mp4")
-    tmp_files.append(text_path)
-    await _apply_text_overlays(main_path, scenes, captions, text_path,
-                                target_duration, w, h, 56, 72)
-
-    # Intro + Outro
-    intro_path = os.path.join(settings.output_dir, f"rintro_{job_id}.mp4")
-    outro_path = os.path.join(settings.output_dir, f"routro_{job_id}.mp4")
-    tmp_files.extend([intro_path, outro_path])
-    await _render_intro(intro_path, w, h)
-    await _render_outro(outro_path, w, h)
-
-    # Concat all
-    concat_path = os.path.join(settings.output_dir, f"rcat_{job_id}.mp4")
-    tmp_files.append(concat_path)
-    await _concat_segments([intro_path, text_path, outro_path], concat_path)
+    # Add captions overlay
+    if captions:
+        text_path = os.path.join(settings.output_dir, f"rtext_{job_id}.mp4")
+        tmp_files.append(text_path)
+        caption_filters = _build_caption_filters(captions, 64, w, h)
+        if caption_filters:
+            filter_file = text_path + ".vf"
+            try:
+                with open(filter_file, "w") as f:
+                    f.write(caption_filters)
+                cmd = [
+                    "ffmpeg", "-y", "-i", main_path,
+                    "-filter_script:v", filter_file,
+                    "-t", str(target_duration),
+                    "-c:v", "libx264", "-preset", "fast", "-crf", "19",
+                    "-pix_fmt", "yuv420p", "-an", text_path,
+                ]
+                await _run_ffmpeg(cmd)
+            finally:
+                _safe_remove(filter_file)
+        else:
+            os.rename(main_path, text_path)
+            if main_path in tmp_files:
+                tmp_files.remove(main_path)
+    else:
+        text_path = main_path
 
     # Audio mix with J-cut
-    await _mix_audio_jcut(concat_path, audio_path, music_path, sfx_path, output_path)
+    await _mix_audio_jcut(text_path, audio_path, music_path, sfx_path, output_path)
 
     for p in tmp_files:
         _safe_remove(p)
 
+    logger.info("Roast V4 rendered: %s", output_path)
     return output_path
