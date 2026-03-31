@@ -844,6 +844,51 @@ async def render_roast_posting_scene(
     await _run_ffmpeg(cmd)
 
 
+async def render_roast_image_scene(
+    image_path: str,
+    scene: RoastScene,
+    output_path: str,
+    w: int = 1920,
+    h: int = 1080,
+) -> None:
+    """Render a fullscreen scene from a still image with Ken Burns zoom/pan.
+    Used for COLD_OPEN, TRANSITION, FINAL_RANKING with Ideogram backgrounds."""
+    dur = scene.duration
+    src_w, src_h = int(w * 1.25), int(h * 1.25)
+    transform = random.choice(["zoom_in", "pan_left", "pan_right", "dolly"])
+    tf = _get_transform(transform, dur, w, h)
+
+    vf = (
+        f"scale={src_w}:{src_h}:force_original_aspect_ratio=decrease,"
+        f"pad={src_w}:{src_h}:(ow-iw)/2:(oh-ih)/2,setsar=1,"
+        f"{COLOR_GRADE},{tf},"
+        f"settb=AVTB,setpts=N/{FPS}/TB,fps={FPS}"
+    )
+
+    # Add overlay quote text
+    if scene.overlay_quote:
+        escaped = _esc(scene.overlay_quote)
+        vf += (
+            f",drawtext=fontfile={FONT_PATH}:text='{escaped}'"
+            f":fontsize=72:fontcolor=0xF0F0F5"
+            f":borderw=3:bordercolor=0xFF2D55"
+            f":x='min(w-text_w-20,(w-text_w)/2)':y=(h-text_h)/2"
+            f":alpha='if(lt(t,0.3),t/0.3,if(gt(t,{max(1.0, dur - 0.5)}),({dur}-t)/0.5,1))'"
+        )
+
+    vf += f",{LOGO_FILTER}"
+
+    cmd = [
+        "ffmpeg", "-y",
+        "-loop", "1", "-t", str(dur), "-i", image_path,
+        "-vf", vf,
+        "-t", str(dur),
+        "-c:v", "libx264", "-preset", "fast", "-crf", "19",
+        "-pix_fmt", "yuv420p", "-an", output_path,
+    ]
+    await _run_ffmpeg(cmd)
+
+
 async def render_roast_clip_scene(
     clip: str,
     scene: RoastScene,

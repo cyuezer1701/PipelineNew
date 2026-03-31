@@ -167,6 +167,64 @@ async def _get_duration(video_path: str) -> float:
         return 45.0
 
 
+async def generate_scene_background(
+    prompt_keywords: list[str],
+    scene_id: int = 0,
+) -> str | None:
+    """Generate a cinematic background image via Ideogram for fullscreen scenes.
+
+    Returns path to 1920x1080 image, or None if generation fails.
+    Used for COLD_OPEN, TRANSITION, FINAL_RANKING backgrounds.
+    """
+    if not settings.ideogram_api_key:
+        return None
+
+    keywords = " ".join(prompt_keywords) if prompt_keywords else "dark dramatic office"
+    prompt = (
+        f"Cinematic wide shot of {keywords}. "
+        f"Moody dark atmosphere, dramatic volumetric lighting, "
+        f"shallow depth of field, film grain, dark teal and orange color grade. "
+        f"No text, no people faces, abstract background. "
+        f"16:9 aspect ratio, 4K quality, professional cinematography."
+    )
+
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.post(
+                IDEOGRAM_API_URL,
+                headers={
+                    "Api-Key": settings.ideogram_api_key,
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "image_request": {
+                        "prompt": prompt,
+                        "aspect_ratio": "ASPECT_16_9",
+                        "model": "V_2",
+                        "magic_prompt_option": "AUTO",
+                        "style_type": "REALISTIC",
+                    },
+                },
+            )
+            response.raise_for_status()
+            data = response.json()
+            image_url = data["data"][0]["url"]
+
+            # Download
+            out = os.path.join(settings.output_dir, f"bg_{scene_id}_{uuid.uuid4().hex[:6]}.jpg")
+            async with client.stream("GET", image_url) as resp:
+                resp.raise_for_status()
+                with open(out, "wb") as f:
+                    async for chunk in resp.aiter_bytes(chunk_size=65536):
+                        f.write(chunk)
+
+        logger.info("Ideogram background generated: %s", out)
+        return out
+    except Exception as e:
+        logger.warning("Ideogram background failed for scene %d: %s", scene_id, e)
+        return None
+
+
 def _safe_remove(path: str) -> None:
     try:
         os.remove(path)
