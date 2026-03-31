@@ -17,7 +17,7 @@ from app.models import Scene, ShotType
 
 logger = logging.getLogger(__name__)
 
-RUNWAY_API_BASE = "https://api.runwayml.com/v1"
+RUNWAY_API_BASE = "https://api.dev.runwayml.com/v1"
 
 # Cinematic lens enrichments per shot type
 SHOT_ENRICHMENTS = {

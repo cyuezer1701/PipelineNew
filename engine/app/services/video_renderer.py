@@ -389,9 +389,9 @@ async def _mix_audio_jcut(
     has_music = music_path and os.path.exists(music_path)
     has_sfx = sfx_path and os.path.exists(sfx_path)
 
-    # Probe video duration for audio trimming
+    # Probe video duration to cap output
     vid_dur = await _probe_duration(video_path)
-    trim_dur = int(vid_dur) + 10 if vid_dur > 0 else 600  # pad 10s safety
+    t_flag = ["-t", str(int(vid_dur) + 2)] if vid_dur > 0 else []
 
     if has_music and has_sfx:
         mvol = settings.music_volume
@@ -403,15 +403,14 @@ async def _mix_audio_jcut(
             "-i", music_path,
             "-i", sfx_path,
             "-filter_complex", (
-                f"[1:a]apad[voicepad];"
                 f"[2:a]volume={mvol},aloop=loop=-1:size=2e+09[music];"
-                f"[music]atrim=0:duration={trim_dur}[mt];"
+                f"[music]atrim=0:duration={int(vid_dur) + 10 if vid_dur > 0 else 600}[mt];"
                 f"[3:a]volume={svol}[sfx];"
-                f"[voicepad][mt][sfx]amix=inputs=3:duration=longest:dropout_transition=2[aout]"
+                f"[1:a][mt][sfx]amix=inputs=3:duration=first:dropout_transition=2[aout]"
             ),
             "-map", "0:v", "-map", "[aout]",
             "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
-            "-movflags", "+faststart", output_path,
+            *t_flag, "-movflags", "+faststart", output_path,
         ]
     elif has_music:
         mvol = settings.music_volume
@@ -421,14 +420,13 @@ async def _mix_audio_jcut(
             "-itsoffset", str(-jcut), "-i", voiceover_path,
             "-i", music_path,
             "-filter_complex", (
-                f"[1:a]apad[voicepad];"
                 f"[2:a]volume={mvol},aloop=loop=-1:size=2e+09[music];"
-                f"[music]atrim=0:duration={trim_dur}[mt];"
-                f"[voicepad][mt]amix=inputs=2:duration=longest:dropout_transition=2[aout]"
+                f"[music]atrim=0:duration={int(vid_dur) + 10 if vid_dur > 0 else 600}[mt];"
+                f"[1:a][mt]amix=inputs=2:duration=first:dropout_transition=2[aout]"
             ),
             "-map", "0:v", "-map", "[aout]",
             "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
-            "-movflags", "+faststart", output_path,
+            *t_flag, "-movflags", "+faststart", output_path,
         ]
     elif has_sfx:
         svol = settings.sfx_volume
@@ -438,23 +436,21 @@ async def _mix_audio_jcut(
             "-itsoffset", str(-jcut), "-i", voiceover_path,
             "-i", sfx_path,
             "-filter_complex", (
-                f"[1:a]apad[voicepad];"
                 f"[2:a]volume={svol}[sfx];"
-                f"[voicepad][sfx]amix=inputs=2:duration=longest:dropout_transition=2[aout]"
+                f"[1:a][sfx]amix=inputs=2:duration=first:dropout_transition=2[aout]"
             ),
             "-map", "0:v", "-map", "[aout]",
             "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
-            "-movflags", "+faststart", output_path,
+            *t_flag, "-movflags", "+faststart", output_path,
         ]
     else:
         cmd = [
             "ffmpeg", "-y",
             "-i", video_path,
             "-itsoffset", str(-jcut), "-i", voiceover_path,
-            "-filter_complex", "[1:a]apad[voicepad]",
-            "-map", "0:v", "-map", "[voicepad]",
+            "-map", "0:v", "-map", "1:a",
             "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
-            "-movflags", "+faststart", output_path,
+            *t_flag, "-movflags", "+faststart", output_path,
         ]
     await _run_ffmpeg(cmd)
 
@@ -618,13 +614,14 @@ def _esc(text: str) -> str:
 
 
 async def _run_ffmpeg(cmd: list[str]) -> None:
-    logger.info("FFmpeg: %s ...", " ".join(cmd[:8]))
+    logger.info("FFmpeg: %s", " ".join(cmd[:12]))
     proc = await asyncio.create_subprocess_exec(
         *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
     )
     _, stderr = await proc.communicate()
     if proc.returncode != 0:
-        error_msg = stderr.decode()[-1500:] if stderr else "Unknown FFmpeg error"
+        error_msg = stderr.decode()[-2000:] if stderr else "Unknown FFmpeg error"
+        logger.error("FFmpeg FAILED: %s\nCmd: %s", error_msg[-500:], " ".join(cmd))
         raise RuntimeError(f"FFmpeg failed (exit {proc.returncode}): {error_msg}")
 
 
@@ -708,8 +705,8 @@ async def render_roast_scene_v2(
             f"pad={card_w}:{h}:(ow-iw)/2:(oh-ih)/2:color=0x0D0D0D,format=rgba,"
             f"fade=t=in:st=0:d=0.5:alpha=1[card];"
             f"color=c=0x0D0D0D:s={w}x{h}:d={dur}:r={FPS}[base];"
-            f"[base][card]overlay=0:0:shortest=1[wcard];"
-            f"[wcard][footage]overlay={card_w}:0:shortest=1[composed];"
+            f"[base][card]overlay=0:0[wcard];"
+            f"[wcard][footage]overlay={card_w}:0[composed];"
             f"[composed]drawtext=fontfile={FONT_PATH}:text='{quote}'"
             f":fontsize=54:fontcolor=0xFFDD00:borderw=5:bordercolor=0xFF1744"
             f":x={quote_x}+(({quote_max_w}-text_w)/2)"
@@ -732,8 +729,8 @@ async def render_roast_scene_v2(
             f"pad={card_w}:{h}:(ow-iw)/2:(oh-ih)/2:color=0x0D0D0D,format=rgba,"
             f"fade=t=in:st=0:d=0.5:alpha=1[card];"
             f"color=c=0x0D0D0D:s={w}x{h}:d={dur}:r={FPS}[base];"
-            f"[base][card]overlay=0:0:shortest=1[wcard];"
-            f"[wcard][footage]overlay={card_w}:0:shortest=1[outv]"
+            f"[base][card]overlay=0:0[wcard];"
+            f"[wcard][footage]overlay={card_w}:0[outv]"
         )
 
     cmd = [
@@ -816,8 +813,8 @@ async def render_roast_posting_scene(
         # Dark background
         f"color=c=0x0D0D0D:s={w}x{h}:d={dur}:r={FPS}[base];"
         # Compose
-        f"[base][posting]overlay=0:0:shortest=1[wpost];"
-        f"[wpost][footage]overlay={posting_w}:0:shortest=1"
+        f"[base][posting]overlay=0:0[wpost];"
+        f"[wpost][footage]overlay={posting_w}:0"
     )
 
     if quote_filter:
@@ -827,7 +824,7 @@ async def render_roast_posting_scene(
 
     cmd = [
         "ffmpeg", "-y",
-        "-i", clip,
+        "-stream_loop", "-1", "-i", clip,
         "-i", posting_png,
         "-filter_complex", filters,
         "-map", "[outv]",
@@ -872,7 +869,8 @@ async def render_roast_clip_scene(
         )
 
     cmd = [
-        "ffmpeg", "-y", "-i", clip,
+        "ffmpeg", "-y",
+        "-stream_loop", "-1", "-i", clip,
         "-vf", vf,
         "-t", str(dur),
         "-c:v", "libx264", "-preset", "fast", "-crf", "19",

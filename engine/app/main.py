@@ -304,73 +304,60 @@ async def _run_roast_pipeline(job_id: str, req: RoastRequest) -> None:
         )
         scene_files.extend([cold_open_path, intro_path])
 
-        # 8. Render each scene with split-screen + correct card variant
+        # 8. Render each scene (with per-scene error handling)
         jobs[job_id].message = "Step 8/10: Rendering scenes..."
+        total_scenes = len(roast.scenes)
         for idx, scene in enumerate(roast.scenes):
             scene_path = os.path.join("/app/output", f"rs{idx}_{job_id}.mp4")
             clip = footage_paths[idx % len(footage_paths)]
             st = scene.scene_type
 
-            # Skip COLD_OPEN and BRANDED_INTRO (already rendered above)
-            if st in (RoastSceneType.COLD_OPEN, RoastSceneType.BRANDED_INTRO):
+            if st in (RoastSceneType.COLD_OPEN, RoastSceneType.BRANDED_INTRO, RoastSceneType.OUTRO):
                 continue
 
-            # OUTRO handled below
-            if st == RoastSceneType.OUTRO:
-                continue
+            jobs[job_id].message = f"Step 8/10: Rendering scene {idx+1}/{total_scenes} ({st.value})..."
 
-            # RATING: full-screen rating card
-            if st == RoastSceneType.RATING and 0 <= scene.job_index < len(req.jobs):
-                await render_roast_fullscreen(
-                    posting_assets[scene.job_index]["rating"], scene, scene_path,
-                )
-                scene_files.append(scene_path)
-                continue
-
-            # FINAL_RANKING: full-screen leaderboard
-            if st == RoastSceneType.FINAL_RANKING:
-                await render_roast_fullscreen(ranking_png, scene, scene_path)
-                scene_files.append(scene_path)
-                continue
-
-            # TRANSITION: use Runway clip if available, else Pexels stock
-            if st == RoastSceneType.TRANSITION:
-                if scene.scene_id in runway_clips:
-                    await render_roast_clip_scene(
-                        runway_clips[scene.scene_id], scene, scene_path,
+            try:
+                if st == RoastSceneType.RATING and 0 <= scene.job_index < len(req.jobs):
+                    await render_roast_fullscreen(
+                        posting_assets[scene.job_index]["rating"], scene, scene_path,
+                    )
+                elif st == RoastSceneType.FINAL_RANKING:
+                    await render_roast_fullscreen(ranking_png, scene, scene_path)
+                elif st == RoastSceneType.TRANSITION:
+                    if scene.scene_id in runway_clips:
+                        await render_roast_clip_scene(
+                            runway_clips[scene.scene_id], scene, scene_path,
+                        )
+                    else:
+                        transition_scene = Scene(
+                            duration=scene.duration,
+                            b_roll_keywords=scene.b_roll_keywords,
+                        )
+                        await _render_single_scene(clip, transition_scene, scene_path, 1920, 1080)
+                elif 0 <= scene.job_index < len(req.jobs):
+                    ji = scene.job_index
+                    hl = scene.highlight_section
+                    if hl and hl in posting_assets[ji]:
+                        posting_png = posting_assets[ji][hl]
+                    else:
+                        posting_png = posting_assets[ji]["full"]
+                    await render_roast_posting_scene(
+                        clip, posting_png,
+                        posting_assets[ji]["bounds"],
+                        scene, scene_path,
                     )
                 else:
-                    transition_scene = Scene(
+                    fallback_scene = Scene(
                         duration=scene.duration,
                         b_roll_keywords=scene.b_roll_keywords,
                     )
-                    await _render_single_scene(clip, transition_scene, scene_path, 1920, 1080)
+                    await _render_single_scene(clip, fallback_scene, scene_path, 1920, 1080)
+
                 scene_files.append(scene_path)
+            except Exception as e:
+                logger.error("Scene %d (%s) failed, skipping: %s", idx, st.value, e)
                 continue
-
-            # JOB scenes: fulltext posting with scroll + B-roll
-            if 0 <= scene.job_index < len(req.jobs):
-                ji = scene.job_index
-                hl = scene.highlight_section
-                # Pick posting variant (highlighted or full)
-                if hl and hl in posting_assets[ji]:
-                    posting_png = posting_assets[ji][hl]
-                else:
-                    posting_png = posting_assets[ji]["full"]
-
-                await render_roast_posting_scene(
-                    clip, posting_png,
-                    posting_assets[ji]["bounds"],
-                    scene, scene_path,
-                )
-                scene_files.append(scene_path)
-            else:
-                fallback_scene = Scene(
-                    duration=scene.duration,
-                    b_roll_keywords=scene.b_roll_keywords,
-                )
-                await _render_single_scene(clip, fallback_scene, scene_path, 1920, 1080)
-                scene_files.append(scene_path)
 
         # 9. Render outro
         jobs[job_id].message = "Step 9/10: Rendering outro..."
