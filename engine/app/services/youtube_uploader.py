@@ -15,6 +15,7 @@ async def upload_to_youtube(
     tags: list[str] | None = None,
     category_id: str = "28",  # Science & Technology
     privacy_status: str = "private",
+    thumbnail_path: str | None = None,
 ) -> str:
     """Upload a video to YouTube and return the video ID.
 
@@ -28,7 +29,8 @@ async def upload_to_youtube(
 
     # YouTube API client is synchronous, run in executor
     video_id = await asyncio.get_event_loop().run_in_executor(
-        None, _upload_sync, video_path, title, description, tags or [], category_id, privacy_status
+        None, _upload_sync, video_path, title, description, tags or [], category_id, privacy_status,
+        thumbnail_path,
     )
     return video_id
 
@@ -40,6 +42,7 @@ def _upload_sync(
     tags: list[str],
     category_id: str,
     privacy_status: str,
+    thumbnail_path: str | None = None,
 ) -> str:
     """Synchronous YouTube upload using google-api-python-client."""
     from google.oauth2.credentials import Credentials
@@ -88,4 +91,19 @@ def _upload_sync(
 
     video_id = response["id"]
     logger.info("Uploaded to YouTube: https://youtu.be/%s", video_id)
+
+    # Upload thumbnail if provided
+    if thumbnail_path:
+        try:
+            import os
+            if os.path.exists(thumbnail_path):
+                thumb_media = MediaFileUpload(thumbnail_path, mimetype="image/jpeg")
+                youtube.thumbnails().set(
+                    videoId=video_id,
+                    media_body=thumb_media,
+                ).execute()
+                logger.info("Thumbnail uploaded for video %s", video_id)
+        except Exception as e:
+            logger.warning("Thumbnail upload failed: %s", e)
+
     return video_id

@@ -402,6 +402,7 @@ async def _run_roast_pipeline(job_id: str, req: RoastRequest) -> None:
             video_id = await upload_to_youtube(
                 video_path=output_path, title=yt_title,
                 description=yt_desc, tags=req.youtube_tags or ["job roast", "stellenanzeige", "obstkorb"],
+                thumbnail_path=thumbnail_path,
             )
             result["youtube_video_id"] = video_id
 

@@ -270,6 +270,23 @@ def _parse_roast_response(raw: str) -> RoastScriptResponse:
             b_roll_keywords=s.get("b_roll_keywords", ["office", "corporate"]),
         ))
 
+    # Auto-correct job_index based on scene order (don't trust Claude's values)
+    JOB_SCENE_TYPES = {
+        "JOB_REVEAL", "TITEL_ROAST", "BENEFITS_ROAST",
+        "ANFORDERUNGEN_ROAST", "GEHALT_ROAST", "RATING",
+    }
+    current_job = -1
+    for scene in scenes:
+        st = scene.scene_type
+        if st == "JOB_REVEAL":
+            current_job += 1
+        if st in JOB_SCENE_TYPES:
+            scene.job_index = min(current_job, 2)  # cap at 2 (3 jobs max)
+        else:
+            scene.job_index = -1
+
+    logger.info("Parsed %d scenes, %d jobs detected", len(scenes), current_job + 1)
+
     return RoastScriptResponse(
         full_script=data.get("full_script", ""),
         cold_open_quote=data.get("cold_open_quote", ""),

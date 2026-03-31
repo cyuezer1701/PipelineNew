@@ -25,6 +25,13 @@ FONT_PATH = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 CROSSFADE_DURATION = 0.3
 FPS = 24  # Cinematic framerate
 
+# JOB ROAST logo watermark — appended to every roast scene filter
+LOGO_FILTER = (
+    f"drawtext=fontfile={FONT_PATH}:text='JOB ROAST'"
+    f":fontsize=28:fontcolor=0xFF1744:borderw=2:bordercolor=black"
+    f":x=30:y=25:alpha=0.85"
+)
+
 # ── Aggressive Transforms (20% zoom, 18% pan) ─────────────
 
 TRANSFORM_FILTERS = {
@@ -783,9 +790,9 @@ async def render_roast_posting_scene(
         quote = _esc(scene.overlay_quote)
         quote_filter = (
             f"drawtext=fontfile={FONT_PATH}:text='{quote}'"
-            f":fontsize=48:fontcolor=0xFFDD00:borderw=4:bordercolor=0xFF1744"
-            f":x={posting_w}+({footage_w}-text_w)/2"
-            f":y=h-120"
+            f":fontsize=38:fontcolor=0xFFDD00:borderw=3:bordercolor=0xFF1744"
+            f":x='min(w-text_w-10,{posting_w}+({footage_w}-text_w)/2)'"
+            f":y=h-100"
             f":enable='between(t,0.8,{max(0.9, dur - 0.3)})'"
             f":alpha='if(lt(t,1.1),(t-0.8)/0.3,if(gt(t,{max(1.0, dur - 0.6)}),({max(1.0, dur - 0.3)}-t)/0.3,1))'"
         )
@@ -818,9 +825,9 @@ async def render_roast_posting_scene(
     )
 
     if quote_filter:
-        filters += f"[comp];[comp]{quote_filter}[outv]"
+        filters += f"[comp];[comp]{quote_filter},{LOGO_FILTER}[outv]"
     else:
-        filters += "[outv]"
+        filters += f"[logo];[logo]{LOGO_FILTER}[outv]"
 
     cmd = [
         "ffmpeg", "-y",
@@ -864,9 +871,12 @@ async def render_roast_clip_scene(
             f",drawtext=fontfile={FONT_PATH}:text='{escaped}'"
             f":fontsize=72:fontcolor=white"
             f":borderw=4:bordercolor=0xFF1744"
-            f":x=(w-text_w)/2:y=(h-text_h)/2"
+            f":x='min(w-text_w-20,(w-text_w)/2)':y=(h-text_h)/2"
             f":alpha='if(lt(t,0.3),t/0.3,if(gt(t,{max(1.0, dur - 0.5)}),({dur}-t)/0.5,1))'"
         )
+
+    # Logo watermark
+    vf += f",{LOGO_FILTER}"
 
     cmd = [
         "ffmpeg", "-y",
@@ -896,7 +906,8 @@ async def render_roast_fullscreen(
             f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color=0x0D0D0D,"
             f"format=yuv420p,"
             f"fade=t=in:st=0:d=0.4,fade=t=out:st={max(0, dur - 0.4)}:d=0.4,"
-            f"settb=AVTB,setpts=N/{FPS}/TB,fps={FPS}"
+            f"settb=AVTB,setpts=N/{FPS}/TB,fps={FPS},"
+            f"{LOGO_FILTER}"
         ),
         "-c:v", "libx264", "-preset", "fast", "-crf", "19",
         "-pix_fmt", "yuv420p", "-an", output_path,
@@ -926,7 +937,8 @@ async def _render_roast_cold_open(
             f":fontsize=72:fontcolor=white"
             f":borderw=3:bordercolor=0xFF1744"
             f":x=(w-text_w)/2:y=(h-text_h)/2"
-            f":alpha='if(lt(t,0.3),t/0.3,if(gt(t,{dur - 0.5}),({dur}-t)/0.5,1))'"
+            f":alpha='if(lt(t,0.3),t/0.3,if(gt(t,{dur - 0.5}),({dur}-t)/0.5,1))',"
+            f"{LOGO_FILTER}"
         ),
         "-c:v", "libx264", "-preset", "fast", "-crf", "18",
         "-pix_fmt", "yuv420p", "-an", output_path,
@@ -960,7 +972,8 @@ async def _render_roast_intro(
             f"drawtext=fontfile={FONT_PATH}:text='{tagline}'"
             f":fontsize=28:fontcolor=0x8899CC"
             f":x=(w-text_w)/2:y=(h/2)+50"
-            f":alpha='if(lt(t,0.5),0,min(1,(t-0.5)/0.3))'"
+            f":alpha='if(lt(t,0.5),0,min(1,(t-0.5)/0.3))',"
+            f"{LOGO_FILTER}"
         ),
         "-c:v", "libx264", "-preset", "fast", "-crf", "18",
         "-pix_fmt", "yuv420p", "-an", output_path,
@@ -993,7 +1006,8 @@ async def _render_roast_outro(
             f"drawtext=fontfile={FONT_PATH}:text='Jeden Tag neue Roasts wallah'"
             f":fontsize=24:fontcolor=0x8899CC"
             f":x=(w-text_w)/2:y=(h/2)+100"
-            f":alpha='if(lt(t,0.8),0,min(1,(t-0.8)/0.4))'"
+            f":alpha='if(lt(t,0.8),0,min(1,(t-0.8)/0.4))',"
+            f"{LOGO_FILTER}"
         ),
         "-c:v", "libx264", "-preset", "fast", "-crf", "18",
         "-pix_fmt", "yuv420p", "-an", output_path,
