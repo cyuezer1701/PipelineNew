@@ -450,20 +450,46 @@ async def _concat_segments(segments: list[str], output_path: str) -> None:
 
 # ── Pattern Interrupts ─────────────────────────────────────
 
+# Variable pacing: scene type → max seconds before a visual change
+PACING_MAP = {
+    "HOOK": 2.0,       # Ultra fast cuts
+    "PROBLEM": 4.0,    # Let the pain sink in
+    "TRANSITION": 2.5, # Snap to attention
+    "STEP": 5.0,       # Slow, give time to learn
+    "DEMO": 5.0,       # Show the process
+    "STAT": 3.0,       # Punch the numbers
+    "BENEFIT": 4.0,    # Let the win feel real
+    "CTA": 5.0,        # Calm conversational close
+}
+
+
 def _get_subshots(scene: Scene) -> list[SubShot]:
     if scene.sub_shots:
         return scene.sub_shots
-    interval = settings.pattern_interrupt_interval
-    if scene.duration <= interval + 1.0:
+
+    # Variable pacing based on scene type
+    max_interval = PACING_MAP.get(scene.label, settings.pattern_interrupt_interval)
+
+    if scene.duration <= max_interval + 0.5:
         transform = random.choice(SHOT_TRANSFORMS.get(scene.shot_type, ["zoom_in"]))
         return [SubShot(shot_type=scene.shot_type, visual_prompt=scene.visual_prompt,
                         duration=scene.duration, transform=transform)]
+
     remaining = scene.duration
     subshots = []
     transforms = SHOT_TRANSFORMS.get(scene.shot_type, ["zoom_in", "pan_left"])
+
+    # HOOK/STAT: ultra short sub-shots (1.5-2.5s). STEP/DEMO: longer (3-5s)
+    if scene.label in ("HOOK", "STAT", "TRANSITION"):
+        min_dur, max_dur = 1.5, 2.5
+    elif scene.label in ("STEP", "DEMO", "CTA"):
+        min_dur, max_dur = 3.0, 5.0
+    else:
+        min_dur, max_dur = 2.5, 3.5
+
     while remaining > 0:
-        dur = min(remaining, random.uniform(2.5, 3.5))
-        if remaining - dur < 1.5:
+        dur = min(remaining, random.uniform(min_dur, max_dur))
+        if remaining - dur < 1.0:
             dur = remaining
         subshots.append(SubShot(shot_type=scene.shot_type, visual_prompt=scene.visual_prompt,
                                 duration=round(dur, 1), transform=random.choice(transforms)))
