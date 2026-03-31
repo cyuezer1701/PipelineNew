@@ -3,7 +3,7 @@
 Renders multiple card variants per job as PNGs using Pillow:
 - Full card (for JOB_REVEAL scenes)
 - Section-highlighted cards (for TITEL/BENEFITS/ANFORDERUNGEN/GEHALT roasts)
-- Rating card (X/10 Doener graphic)
+- Rating card (X/10 Döner graphic)
 - Ranking leaderboard (final ranking screen)
 """
 from __future__ import annotations
@@ -230,7 +230,7 @@ def _draw_highlight_border(draw: ImageDraw.Draw, x0: int, y0: int,
 # ── Rating Card ──────────────────────────────────────────
 
 async def render_rating_card(job: JobPosting, rating: int) -> str:
-    """Render X/10 Doener rating graphic."""
+    """Render X/10 Döner rating graphic."""
     width, height = 1400, 900
     img = Image.new("RGBA", (width, height), (*BG_COLOR, 255))
     draw = ImageDraw.Draw(img)
@@ -254,7 +254,7 @@ async def render_rating_card(job: JobPosting, rating: int) -> str:
     rx = (width - bbox[2]) // 2
     draw.text((rx, 200), rating_text, font=big_font, fill=rating_color)
 
-    # Doener dots
+    # Döner dots
     dot_size = 40
     dot_gap = 16
     total_w = 10 * dot_size + 9 * dot_gap
@@ -271,15 +271,15 @@ async def render_rating_card(job: JobPosting, rating: int) -> str:
                          fill=(50, 50, 60), outline=(70, 70, 80))
 
     label_font = _font(FONT_BOLD, 36)
-    bbox = label_font.getbbox("DOENER")
+    bbox = label_font.getbbox("DÖNER")
     draw.text(((width - bbox[2]) // 2, dot_y + dot_size + 30),
-              "DOENER", font=label_font, fill=TEXT_DIM)
+              "DÖNER", font=label_font, fill=TEXT_DIM)
 
     # Verdict
     if rating <= 3:
         verdict = "Wallah traurig. Finger weg Bruder."
     elif rating <= 5:
-        verdict = "Mittelmaessig. Kannste machen, musste aber nicht."
+        verdict = "Mittelmäßig. Kannste machen, musste aber nicht."
     elif rating <= 7:
         verdict = "Geht klar. Nicht schlecht, nicht geil."
     else:
@@ -289,7 +289,7 @@ async def render_rating_card(job: JobPosting, rating: int) -> str:
     draw.text(((width - bbox[2]) // 2, 620), verdict, font=verdict_font, fill=TEXT_WHITE)
 
     sub_font = _font(FONT_REGULAR, 24)
-    sub = f"{rating} von 10 Doenern"
+    sub = f"{rating} von 10 Dönern"
     bbox = sub_font.getbbox(sub)
     draw.text(((width - bbox[2]) // 2, height - 120), sub, font=sub_font, fill=rating_color)
 
@@ -371,8 +371,8 @@ async def render_ranking_leaderboard(
                   font=r_font, fill=r_color)
 
         d_font = _font(FONT_REGULAR, 20)
-        dbbox = d_font.getbbox("DOENER")
-        draw.text((width - 250 - dbbox[2] // 2, y + 135), "DOENER",
+        dbbox = d_font.getbbox("DÖNER")
+        draw.text((width - 250 - dbbox[2] // 2, y + 135), "DÖNER",
                   font=d_font, fill=TEXT_DIM)
 
     out = os.path.join(settings.output_dir, f"ranking_{uuid.uuid4().hex[:8]}.png")
