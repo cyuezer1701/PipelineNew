@@ -627,32 +627,22 @@ async def render_roast_scene(
     transform = random.choice(["zoom_in", "pan_left", "pan_right", "dolly"])
     tf = _get_transform(transform, dur, w, h)
 
-    # Scale card to fit nicely (70% of video width, centered)
     card_w = int(w * 0.7)
-
-    # Show card for scenes labeled REVEAL, fade in/out for others
-    is_reveal = "REVEAL" in scene.label.upper()
-    if is_reveal:
-        alpha_expr = f"if(lt(t,0.5),t/0.5,if(gt(t,{dur-0.5}),({dur}-t)/0.5,1))"
-    else:
-        alpha_expr = "0"  # No card for non-reveal scenes
 
     cmd = [
         "ffmpeg", "-y",
         "-i", clip,
         "-i", card_image,
         "-filter_complex", (
-            # Background: trim, scale, color grade, transform
             f"[0:v]trim=0:{dur},setpts=PTS-STARTPTS,"
             f"scale={src_w}:{src_h}:force_original_aspect_ratio=decrease,"
             f"pad={src_w}:{src_h}:(ow-iw)/2:(oh-ih)/2,setsar=1,"
             f"{COLOR_GRADE},{tf},"
             f"settb=AVTB,setpts=N/25/TB,fps=25[bg];"
-            # Card overlay: scale + alpha
             f"[1:v]scale={card_w}:-1,format=rgba,"
-            f"colorchannelmixer=aa={alpha_expr}[card];"
-            # Composite: center the card on background
-            f"[bg][card]overlay=(W-w)/2:(H-h)/2:format=auto:shortest=1[outv]"
+            f"fade=t=in:st=0:d=0.5:alpha=1,"
+            f"fade=t=out:st={max(0, dur - 0.5)}:d=0.5:alpha=1[card];"
+            f"[bg][card]overlay=(W-w)/2:(H-h)/2:shortest=1[outv]"
         ),
         "-map", "[outv]",
         "-t", str(dur),
