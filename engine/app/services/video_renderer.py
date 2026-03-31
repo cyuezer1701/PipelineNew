@@ -738,6 +738,49 @@ async def render_roast_scene_v2(
     await _run_ffmpeg(cmd)
 
 
+async def render_roast_clip_scene(
+    clip: str,
+    scene: RoastScene,
+    output_path: str,
+    w: int = 1920,
+    h: int = 1080,
+) -> None:
+    """Render a fullscreen scene with a Runway/Pexels clip + optional overlay text.
+    Used for COLD_OPEN (with quote) and TRANSITION scenes."""
+    dur = scene.duration
+    src_w, src_h = int(w * 1.25), int(h * 1.25)
+    transform = random.choice(["zoom_in", "pan_left", "dolly"])
+    tf = _get_transform(transform, dur, w, h)
+
+    vf = (
+        f"trim=0:{dur},setpts=PTS-STARTPTS,"
+        f"scale={src_w}:{src_h}:force_original_aspect_ratio=decrease,"
+        f"pad={src_w}:{src_h}:(ow-iw)/2:(oh-ih)/2,setsar=1,"
+        f"{COLOR_GRADE},{tf},"
+        f"settb=AVTB,setpts=N/{FPS}/TB,fps={FPS}"
+    )
+
+    # Add overlay quote for COLD_OPEN scenes
+    if scene.overlay_quote:
+        escaped = _esc(scene.overlay_quote)
+        vf += (
+            f",drawtext=fontfile={FONT_PATH}:text='{escaped}'"
+            f":fontsize=72:fontcolor=white"
+            f":borderw=4:bordercolor=0xFF1744"
+            f":x=(w-text_w)/2:y=(h-text_h)/2"
+            f":alpha='if(lt(t,0.3),t/0.3,if(gt(t,{max(1.0, dur - 0.5)}),({dur}-t)/0.5,1))'"
+        )
+
+    cmd = [
+        "ffmpeg", "-y", "-i", clip,
+        "-vf", vf,
+        "-t", str(dur),
+        "-c:v", "libx264", "-preset", "fast", "-crf", "19",
+        "-pix_fmt", "yuv420p", "-an", output_path,
+    ]
+    await _run_ffmpeg(cmd)
+
+
 async def render_roast_fullscreen(
     image_png: str,
     scene: RoastScene,

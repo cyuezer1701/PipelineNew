@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import logging
 import os
 import uuid
 from contextlib import asynccontextmanager
 
+logger = logging.getLogger(__name__)
+
 from fastapi import BackgroundTasks, FastAPI
 
+from app.config import settings
 from app.models import (
     GenerateRequest,
     JobResponse,
@@ -179,12 +183,14 @@ async def _run_roast_pipeline(job_id: str, req: RoastRequest) -> None:
             render_rating_card,
         )
         from app.services.job_roast_generator import generate_roast_script
+        from app.services.runway_generator import generate_runway_footage
         from app.services.stock_footage import download_footage_for_sections
         from app.services.video_renderer import (
             _render_roast_cold_open,
             _render_roast_intro,
             _render_roast_outro,
             _render_single_scene,
+            render_roast_clip_scene,
             render_roast_compilation_v2,
             render_roast_fullscreen,
             render_roast_scene_v2,
@@ -223,15 +229,38 @@ async def _run_roast_pipeline(job_id: str, req: RoastRequest) -> None:
             req.jobs, roast.job_ratings, roast.final_ranking,
         )
 
-        # 5. Download background footage
-        jobs[job_id].message = "Step 5/10: Downloading footage..."
-        # Create Scene-compatible objects for footage download
+        # 5. Download background footage (Pexels) + generate Runway clips for fullscreen scenes
+        jobs[job_id].message = "Step 5/10: Downloading footage + Runway AI clips..."
         from app.models import Scene
         footage_scenes = [Scene(
             b_roll_keywords=s.b_roll_keywords,
             duration=s.duration,
         ) for s in roast.scenes]
         footage_paths = await download_footage_for_sections(footage_scenes)
+
+        # Generate Runway clips for fullscreen scenes (COLD_OPEN, TRANSITION, FINAL_RANKING)
+        runway_clips: dict[int, str] = {}
+        if settings.runway_api_key:
+            runway_scenes = []
+            for s in roast.scenes:
+                if s.scene_type in (RoastSceneType.COLD_OPEN, RoastSceneType.TRANSITION, RoastSceneType.FINAL_RANKING):
+                    # Build visual prompt for Runway
+                    keywords = " ".join(s.b_roll_keywords) if s.b_roll_keywords else "dramatic office"
+                    runway_scene = Scene(
+                        scene_id=s.scene_id,
+                        visual_prompt=f"Cinematic {keywords}, moody lighting, dark atmosphere, slow motion",
+                        shot_type="medium",
+                        duration=min(s.duration, 10),
+                        b_roll_keywords=s.b_roll_keywords,
+                    )
+                    runway_scenes.append(runway_scene)
+            if runway_scenes:
+                try:
+                    jobs[job_id].message = f"Step 5/10: Generating {len(runway_scenes)} Runway AI clips..."
+                    runway_clips = await generate_runway_footage(runway_scenes)
+                    logger.info("Runway generated %d clips for fullscreen scenes", len(runway_clips))
+                except Exception as e:
+                    logger.warning("Runway generation failed, falling back to Pexels: %s", e)
 
         # 6. Generate music + SFX
         jobs[job_id].message = "Step 6/10: Generating audio layers..."
@@ -245,12 +274,21 @@ async def _run_roast_pipeline(job_id: str, req: RoastRequest) -> None:
         intro_scene = next((s for s in roast.scenes if s.scene_type == RoastSceneType.BRANDED_INTRO), None)
         outro_scene = next((s for s in roast.scenes if s.scene_type == RoastSceneType.OUTRO), None)
 
+        # Cold open: use Runway clip if available, else text-on-black
         cold_open_path = os.path.join("/app/output", f"coldopen_{job_id}.mp4")
+        cold_open_dur = cold_open_scene.duration if cold_open_scene else 5.0
+        if cold_open_scene and cold_open_scene.scene_id in runway_clips:
+            # Runway clip with quote overlay
+            await render_roast_clip_scene(
+                runway_clips[cold_open_scene.scene_id], cold_open_scene, cold_open_path,
+            )
+        else:
+            await _render_roast_cold_open(
+                roast.cold_open_quote or roast.thumbnail_text, cold_open_path,
+                duration=cold_open_dur,
+            )
+
         intro_path = os.path.join("/app/output", f"intro_{job_id}.mp4")
-        await _render_roast_cold_open(
-            roast.cold_open_quote or roast.thumbnail_text, cold_open_path,
-            duration=cold_open_scene.duration if cold_open_scene else 5.0,
-        )
         await _render_roast_intro(
             intro_path,
             duration=intro_scene.duration if intro_scene else 5.0,
@@ -285,13 +323,18 @@ async def _run_roast_pipeline(job_id: str, req: RoastRequest) -> None:
                 scene_files.append(scene_path)
                 continue
 
-            # TRANSITION: render with stock footage only (no card)
+            # TRANSITION: use Runway clip if available, else Pexels stock
             if st == RoastSceneType.TRANSITION:
-                transition_scene = Scene(
-                    duration=scene.duration,
-                    b_roll_keywords=scene.b_roll_keywords,
-                )
-                await _render_single_scene(clip, transition_scene, scene_path, 1920, 1080)
+                if scene.scene_id in runway_clips:
+                    await render_roast_clip_scene(
+                        runway_clips[scene.scene_id], scene, scene_path,
+                    )
+                else:
+                    transition_scene = Scene(
+                        duration=scene.duration,
+                        b_roll_keywords=scene.b_roll_keywords,
+                    )
+                    await _render_single_scene(clip, transition_scene, scene_path, 1920, 1080)
                 scene_files.append(scene_path)
                 continue
 
