@@ -129,14 +129,14 @@ async def _compile_sfx_track(
     inputs = ["-f", "lavfi", "-i", f"anullsrc=r=44100:cl=stereo:d={total_duration}"]
     filter_parts = []
     mix_inputs = ["[0:a]"]
+    input_count = 1  # silent base is input 0
 
     for i, t in enumerate(transition_times):
-        # Alternate between whoosh and thud for variety
         sfx_file = whoosh_path if i % 2 == 0 else thud_path
-        input_idx = len(inputs) // 2  # Each -i adds 2 args
+        input_idx = input_count
         inputs.extend(["-i", sfx_file])
+        input_count += 1
 
-        # Place SFX 0.2s before the transition point
         delay_ms = max(0, int((t - 0.2) * 1000))
         filter_parts.append(f"[{input_idx}:a]adelay={delay_ms}|{delay_ms}[s{i}]")
         mix_inputs.append(f"[s{i}]")
