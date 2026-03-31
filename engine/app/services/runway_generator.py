@@ -93,10 +93,10 @@ async def _generate_single_shot(
 
     # Build request body
     body: dict = {
-        "model": "gen4_turbo",
+        "model": "gen4.5",
         "promptText": full_prompt,
         "duration": max(5, int(duration)),
-        "ratio": "1280:768",
+        "ratio": "1280:720",
     }
 
     if character_ref:
