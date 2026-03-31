@@ -260,15 +260,22 @@ async def _concat_with_transitions(
             )
             acc += scenes[i].duration - cf
 
-    cmd = [
-        "ffmpeg", "-y", *inputs,
-        "-filter_complex", "".join(filter_parts),
-        "-map", "[outv]",
-        "-t", str(target_duration),
-        "-c:v", "libx264", "-preset", "fast", "-crf", "19",
-        "-pix_fmt", "yuv420p", "-an", output_path,
-    ]
-    await _run_ffmpeg(cmd)
+    # Write filter to file to avoid "Argument list too long" on videos with many scenes
+    filter_file = output_path + ".filter"
+    try:
+        with open(filter_file, "w") as f:
+            f.write("".join(filter_parts))
+        cmd = [
+            "ffmpeg", "-y", *inputs,
+            "-filter_complex_script", filter_file,
+            "-map", "[outv]",
+            "-t", str(target_duration),
+            "-c:v", "libx264", "-preset", "fast", "-crf", "19",
+            "-pix_fmt", "yuv420p", "-an", output_path,
+        ]
+        await _run_ffmpeg(cmd)
+    finally:
+        _safe_remove(filter_file)
 
 
 # ── Pass 3: Text Overlays ─────────────────────────────────
@@ -289,14 +296,21 @@ async def _apply_text_overlays(
         os.rename(video_path, output_path)
         return
 
-    cmd = [
-        "ffmpeg", "-y", "-i", video_path,
-        "-vf", all_text,
-        "-t", str(target_duration),
-        "-c:v", "libx264", "-preset", "fast", "-crf", "19",
-        "-pix_fmt", "yuv420p", "-an", output_path,
-    ]
-    await _run_ffmpeg(cmd)
+    # Write filter to file to avoid "Argument list too long" on long videos
+    filter_file = output_path + ".vf"
+    try:
+        with open(filter_file, "w") as f:
+            f.write(all_text)
+        cmd = [
+            "ffmpeg", "-y", "-i", video_path,
+            "-filter_script:v", filter_file,
+            "-t", str(target_duration),
+            "-c:v", "libx264", "-preset", "fast", "-crf", "19",
+            "-pix_fmt", "yuv420p", "-an", output_path,
+        ]
+        await _run_ffmpeg(cmd)
+    finally:
+        _safe_remove(filter_file)
 
 
 # ── Intro / Outro ──────────────────────────────────────────
