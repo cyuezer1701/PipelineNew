@@ -380,13 +380,20 @@ async def _mix_audio_jcut(
     music_path: str | None, sfx_path: str | None,
     output_path: str,
 ) -> None:
-    """Mix audio layers: voiceover (J-cut) + background music + SFX track."""
+    """Mix audio layers: voiceover (J-cut) + background music + SFX track.
+
+    Video duration is the master — audio is padded/trimmed to match.
+    No -shortest flag to prevent premature truncation.
+    """
     jcut = settings.jcut_offset
     has_music = music_path and os.path.exists(music_path)
     has_sfx = sfx_path and os.path.exists(sfx_path)
 
+    # Probe video duration for audio trimming
+    vid_dur = await _probe_duration(video_path)
+    trim_dur = int(vid_dur) + 10 if vid_dur > 0 else 600  # pad 10s safety
+
     if has_music and has_sfx:
-        # Full mix: voice + music + SFX (3 audio layers)
         mvol = settings.music_volume
         svol = settings.sfx_volume
         cmd = [
@@ -396,14 +403,15 @@ async def _mix_audio_jcut(
             "-i", music_path,
             "-i", sfx_path,
             "-filter_complex", (
+                f"[1:a]apad[voicepad];"
                 f"[2:a]volume={mvol},aloop=loop=-1:size=2e+09[music];"
-                f"[music]atrim=0:duration=300[mt];"
+                f"[music]atrim=0:duration={trim_dur}[mt];"
                 f"[3:a]volume={svol}[sfx];"
-                f"[1:a][mt][sfx]amix=inputs=3:duration=first:dropout_transition=2[aout]"
+                f"[voicepad][mt][sfx]amix=inputs=3:duration=longest:dropout_transition=2[aout]"
             ),
             "-map", "0:v", "-map", "[aout]",
             "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
-            "-shortest", "-movflags", "+faststart", output_path,
+            "-movflags", "+faststart", output_path,
         ]
     elif has_music:
         mvol = settings.music_volume
@@ -413,13 +421,14 @@ async def _mix_audio_jcut(
             "-itsoffset", str(-jcut), "-i", voiceover_path,
             "-i", music_path,
             "-filter_complex", (
+                f"[1:a]apad[voicepad];"
                 f"[2:a]volume={mvol},aloop=loop=-1:size=2e+09[music];"
-                f"[music]atrim=0:duration=300[mt];"
-                f"[1:a][mt]amix=inputs=2:duration=first:dropout_transition=2[aout]"
+                f"[music]atrim=0:duration={trim_dur}[mt];"
+                f"[voicepad][mt]amix=inputs=2:duration=longest:dropout_transition=2[aout]"
             ),
             "-map", "0:v", "-map", "[aout]",
             "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
-            "-shortest", "-movflags", "+faststart", output_path,
+            "-movflags", "+faststart", output_path,
         ]
     elif has_sfx:
         svol = settings.sfx_volume
@@ -429,21 +438,23 @@ async def _mix_audio_jcut(
             "-itsoffset", str(-jcut), "-i", voiceover_path,
             "-i", sfx_path,
             "-filter_complex", (
+                f"[1:a]apad[voicepad];"
                 f"[2:a]volume={svol}[sfx];"
-                f"[1:a][sfx]amix=inputs=2:duration=first:dropout_transition=2[aout]"
+                f"[voicepad][sfx]amix=inputs=2:duration=longest:dropout_transition=2[aout]"
             ),
             "-map", "0:v", "-map", "[aout]",
             "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
-            "-shortest", "-movflags", "+faststart", output_path,
+            "-movflags", "+faststart", output_path,
         ]
     else:
         cmd = [
             "ffmpeg", "-y",
             "-i", video_path,
             "-itsoffset", str(-jcut), "-i", voiceover_path,
-            "-map", "0:v", "-map", "1:a",
+            "-filter_complex", "[1:a]apad[voicepad]",
+            "-map", "0:v", "-map", "[voicepad]",
             "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
-            "-shortest", "-movflags", "+faststart", output_path,
+            "-movflags", "+faststart", output_path,
         ]
     await _run_ffmpeg(cmd)
 
@@ -738,6 +749,95 @@ async def render_roast_scene_v2(
     await _run_ffmpeg(cmd)
 
 
+async def render_roast_posting_scene(
+    clip: str,
+    posting_png: str,
+    section_bounds: dict[str, tuple[int, int]],
+    scene: RoastScene,
+    output_path: str,
+    w: int = 1920,
+    h: int = 1080,
+) -> None:
+    """Render a scene with the job posting scrolled to the relevant section.
+
+    Layout: posting (70% left) + B-roll footage (30% right).
+    The posting PNG is tall (1400x2400+) and cropped to show the target section.
+    """
+    dur = scene.duration
+    posting_w = int(w * 0.70)  # 1344px
+    footage_w = w - posting_w  # 576px
+    src_w, src_h = int(footage_w * 1.4), int(h * 1.4)
+
+    transform = random.choice(["zoom_in", "pan_left", "dolly"])
+    tf = _get_transform(transform, dur, footage_w, h)
+
+    # Determine scroll target Y based on highlight_section
+    hl = scene.highlight_section
+    if hl and hl in section_bounds:
+        target_y = max(0, section_bounds[hl][0] - 80)  # 80px padding above section
+    elif scene.scene_type == RoastSceneType.JOB_REVEAL:
+        target_y = 0  # Start from top
+    else:
+        target_y = 0
+
+    # Build overlay quote drawtext if present
+    quote_filter = ""
+    if scene.overlay_quote:
+        quote = _esc(scene.overlay_quote)
+        quote_filter = (
+            f"drawtext=fontfile={FONT_PATH}:text='{quote}'"
+            f":fontsize=48:fontcolor=0xFFDD00:borderw=4:bordercolor=0xFF1744"
+            f":x={posting_w}+({footage_w}-text_w)/2"
+            f":y=h-120"
+            f":enable='between(t,0.8,{max(0.9, dur - 0.3)})'"
+            f":alpha='if(lt(t,1.1),(t-0.8)/0.3,if(gt(t,{max(1.0, dur - 0.6)}),({max(1.0, dur - 0.3)}-t)/0.3,1))'"
+        )
+
+    # For JOB_REVEAL: scroll from top to bottom over duration
+    if scene.scene_type == RoastSceneType.JOB_REVEAL:
+        scroll_expr = f"min(ih-{h}, (ih-{h})*t/{max(1, dur)})"
+    else:
+        # Static: hold at target section position
+        scroll_expr = f"min(ih-{h}, {target_y})"
+
+    filters = (
+        # B-roll footage (right 30%)
+        f"[0:v]trim=0:{dur},setpts=PTS-STARTPTS,"
+        f"scale={src_w}:{src_h}:force_original_aspect_ratio=decrease,"
+        f"pad={src_w}:{src_h}:(ow-iw)/2:(oh-ih)/2,setsar=1,"
+        f"{COLOR_GRADE},{tf},"
+        f"settb=AVTB,setpts=N/{FPS}/TB,fps={FPS},"
+        f"crop={footage_w}:{h}:(iw-{footage_w})/2:0,"
+        f"eq=brightness=-0.12[footage];"
+        # Posting PNG (left 70%) — scale to width, crop to viewport with scroll
+        f"[1:v]scale={posting_w}:-1,"
+        f"pad={posting_w}:ih+{h}:0:{h//2}:color=0x0D0D0D,"
+        f"crop={posting_w}:{h}:0:'{scroll_expr}'[posting];"
+        # Dark background
+        f"color=c=0x0D0D0D:s={w}x{h}:d={dur}:r={FPS}[base];"
+        # Compose
+        f"[base][posting]overlay=0:0:shortest=1[wpost];"
+        f"[wpost][footage]overlay={posting_w}:0:shortest=1"
+    )
+
+    if quote_filter:
+        filters += f"[comp];[comp]{quote_filter}[outv]"
+    else:
+        filters += "[outv]"
+
+    cmd = [
+        "ffmpeg", "-y",
+        "-i", clip,
+        "-i", posting_png,
+        "-filter_complex", filters,
+        "-map", "[outv]",
+        "-t", str(dur),
+        "-c:v", "libx264", "-preset", "fast", "-crf", "19",
+        "-pix_fmt", "yuv420p", "-an", output_path,
+    ]
+    await _run_ffmpeg(cmd)
+
+
 async def render_roast_clip_scene(
     clip: str,
     scene: RoastScene,
@@ -914,49 +1014,23 @@ async def render_roast_compilation_v2(
     w: int = 1920,
     h: int = 1080,
 ) -> str:
-    """Assemble V4 roast: concat all pre-rendered scenes + captions + audio."""
+    """Assemble V5 roast: concat all pre-rendered scenes + audio (no captions)."""
     job_id = uuid.uuid4().hex[:8]
     output_path = os.path.join(settings.output_dir, f"roast_{job_id}.mp4")
     tmp_files = []
 
-    # Concat all scene files (cold open, intro, job scenes, ranking, outro already rendered)
+    # Concat all scene files
     if len(scene_files) == 1:
         main_path = scene_files[0]
     else:
         main_path = os.path.join(settings.output_dir, f"rmain_{job_id}.mp4")
         tmp_files.append(main_path)
-        # Use simple concat (scenes already have correct timing)
         await _concat_segments(scene_files, main_path)
 
-    # Add captions overlay
-    if captions:
-        text_path = os.path.join(settings.output_dir, f"rtext_{job_id}.mp4")
-        tmp_files.append(text_path)
-        caption_filters = _build_caption_filters(captions, 64, w, h)
-        if caption_filters:
-            filter_file = text_path + ".vf"
-            try:
-                with open(filter_file, "w") as f:
-                    f.write(caption_filters)
-                cmd = [
-                    "ffmpeg", "-y", "-i", main_path,
-                    "-filter_script:v", filter_file,
-                    "-t", str(target_duration),
-                    "-c:v", "libx264", "-preset", "fast", "-crf", "19",
-                    "-pix_fmt", "yuv420p", "-an", text_path,
-                ]
-                await _run_ffmpeg(cmd)
-            finally:
-                _safe_remove(filter_file)
-        else:
-            os.rename(main_path, text_path)
-            if main_path in tmp_files:
-                tmp_files.remove(main_path)
-    else:
-        text_path = main_path
+    # No caption overlay — yellow overlay quotes are baked into scene renders
 
     # Duration sanity check before audio mix
-    video_dur = await _probe_duration(text_path)
+    video_dur = await _probe_duration(main_path)
     audio_dur = await _probe_duration(audio_path)
     if video_dur > 0 and audio_dur > 0 and abs(video_dur - audio_dur) > 10.0:
         logger.warning(
@@ -965,7 +1039,7 @@ async def render_roast_compilation_v2(
         )
 
     # Audio mix with J-cut
-    await _mix_audio_jcut(text_path, audio_path, music_path, sfx_path, output_path)
+    await _mix_audio_jcut(main_path, audio_path, music_path, sfx_path, output_path)
 
     for p in tmp_files:
         _safe_remove(p)

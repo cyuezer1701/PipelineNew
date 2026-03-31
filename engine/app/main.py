@@ -177,8 +177,7 @@ async def _run_roast_pipeline(job_id: str, req: RoastRequest) -> None:
 
         from app.models import RoastSceneType
         from app.services.job_card_renderer import (
-            render_job_card,
-            render_job_card_highlighted,
+            render_job_posting,
             render_ranking_leaderboard,
             render_rating_card,
         )
@@ -193,7 +192,7 @@ async def _run_roast_pipeline(job_id: str, req: RoastRequest) -> None:
             render_roast_clip_scene,
             render_roast_compilation_v2,
             render_roast_fullscreen,
-            render_roast_scene_v2,
+            render_roast_posting_scene,
         )
 
         # 1. Generate roast script (Claude — Deutsch, Kanacken-Slang)
@@ -207,23 +206,33 @@ async def _run_roast_pipeline(job_id: str, req: RoastRequest) -> None:
             guide_audio_path=req.guide_audio_url,
         )
 
-        # 3. Generate captions (German)
-        jobs[job_id].message = "Step 3/10: Generating German captions..."
-        captions = await generate_captions(audio_path)
+        # 3. Skip captions (not needed — overlay quotes are baked into scenes)
+        captions = None
 
-        # 4. Pre-render ALL card assets (19 PNGs)
-        jobs[job_id].message = "Step 4/10: Rendering card assets..."
-        card_assets: dict[int, dict[str, str]] = {}
+        # 4. Pre-render job postings + rating cards + ranking
+        jobs[job_id].message = "Step 4/10: Rendering job postings..."
+        posting_assets: dict[int, dict] = {}
         for i, job_posting in enumerate(req.jobs):
-            card_assets[i] = {
-                "full": await render_job_card(job_posting),
-                "title": await render_job_card_highlighted(job_posting, "title"),
-                "benefits": await render_job_card_highlighted(job_posting, "benefits"),
-                "requirements": await render_job_card_highlighted(job_posting, "requirements"),
-                "salary": await render_job_card_highlighted(job_posting, "salary"),
-            }
+            # Full posting (no highlight) — used for JOB_REVEAL
+            full_png, full_bounds = await render_job_posting(job_posting, "")
+            # Highlighted variants — used for TITEL/BENEFITS/ANFORDERUNGEN/GEHALT roasts
+            title_png, _ = await render_job_posting(job_posting, "title")
+            benefits_png, _ = await render_job_posting(job_posting, "benefits")
+            requirements_png, _ = await render_job_posting(job_posting, "requirements")
+            salary_png, _ = await render_job_posting(job_posting, "salary")
+
             rating = roast.job_ratings[i] if i < len(roast.job_ratings) else 5
-            card_assets[i]["rating"] = await render_rating_card(job_posting, rating)
+            rating_png = await render_rating_card(job_posting, rating)
+
+            posting_assets[i] = {
+                "full": full_png,
+                "title": title_png,
+                "benefits": benefits_png,
+                "requirements": requirements_png,
+                "salary": salary_png,
+                "rating": rating_png,
+                "bounds": full_bounds,  # Section Y-positions for scroll targeting
+            }
 
         ranking_png = await render_ranking_leaderboard(
             req.jobs, roast.job_ratings, roast.final_ranking,
@@ -312,8 +321,9 @@ async def _run_roast_pipeline(job_id: str, req: RoastRequest) -> None:
 
             # RATING: full-screen rating card
             if st == RoastSceneType.RATING and 0 <= scene.job_index < len(req.jobs):
-                rating_png = card_assets[scene.job_index]["rating"]
-                await render_roast_fullscreen(rating_png, scene, scene_path)
+                await render_roast_fullscreen(
+                    posting_assets[scene.job_index]["rating"], scene, scene_path,
+                )
                 scene_files.append(scene_path)
                 continue
 
@@ -338,21 +348,23 @@ async def _run_roast_pipeline(job_id: str, req: RoastRequest) -> None:
                 scene_files.append(scene_path)
                 continue
 
-            # JOB scenes (REVEAL, TITEL_ROAST, etc.): split-screen with card
+            # JOB scenes: fulltext posting with scroll + B-roll
             if 0 <= scene.job_index < len(req.jobs):
-                # Pick the right card variant
+                ji = scene.job_index
                 hl = scene.highlight_section
-                if hl and hl in card_assets[scene.job_index]:
-                    card_png = card_assets[scene.job_index][hl]
-                elif st == RoastSceneType.JOB_REVEAL:
-                    card_png = card_assets[scene.job_index]["full"]
+                # Pick posting variant (highlighted or full)
+                if hl and hl in posting_assets[ji]:
+                    posting_png = posting_assets[ji][hl]
                 else:
-                    card_png = card_assets[scene.job_index]["full"]
+                    posting_png = posting_assets[ji]["full"]
 
-                await render_roast_scene_v2(clip, card_png, scene, scene_path)
+                await render_roast_posting_scene(
+                    clip, posting_png,
+                    posting_assets[ji]["bounds"],
+                    scene, scene_path,
+                )
                 scene_files.append(scene_path)
             else:
-                # Fallback: stock footage only
                 fallback_scene = Scene(
                     duration=scene.duration,
                     b_roll_keywords=scene.b_roll_keywords,
