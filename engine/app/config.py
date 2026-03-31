@@ -16,6 +16,12 @@ class Settings(BaseSettings):
     # Stock Footage (Pexels)
     pexels_api_key: str = ""
 
+    # AI Music (Mubert)
+    mubert_api_key: str = ""
+
+    # AI Thumbnails (OpenAI DALL-E)
+    openai_api_key: str = ""
+
     # YouTube
     youtube_client_id: str = ""
     youtube_client_secret: str = ""
@@ -27,13 +33,14 @@ class Settings(BaseSettings):
 
     # Audio
     music_volume: float = 0.15
+    sfx_volume: float = 0.35
 
     # Retention Editing
-    pattern_interrupt_interval: float = 3.0  # max seconds before a visual change
-    jcut_offset: float = 0.5  # audio leads video by this many seconds
+    pattern_interrupt_interval: float = 3.0
+    jcut_offset: float = 0.5
 
     # Footage Mix
-    runway_footage_ratio: float = 0.7  # 70% AI, 30% real stock
+    runway_footage_ratio: float = 0.7
 
     # Paths
     output_dir: str = "/app/output"

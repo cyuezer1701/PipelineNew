@@ -86,6 +86,8 @@ async def render_video(
     captions: list[WordTimestamp] | None = None,
     music_mood: str = "energetic",
     video_format: str = "landscape",
+    music_path: str | None = None,
+    sfx_path: str | None = None,
 ) -> str:
     job_id = uuid.uuid4().hex[:8]
     output_path = os.path.join(settings.output_dir, f"final_{job_id}.mp4")
@@ -135,8 +137,7 @@ async def render_video(
     await _concat_segments([intro_path, text_path, outro_path], concat_path)
 
     # ── Audio mix with J-cut ───────────────────────────────
-    music_path = _pick_music(music_mood)
-    await _mix_audio_jcut(concat_path, audio_path, music_path, output_path)
+    await _mix_audio_jcut(concat_path, audio_path, music_path, sfx_path, output_path)
 
     for p in tmp_files:
         _safe_remove(p)
@@ -363,21 +364,60 @@ async def _render_outro(output_path: str, w: int, h: int) -> None:
 
 async def _mix_audio_jcut(
     video_path: str, voiceover_path: str,
-    music_path: str | None, output_path: str,
+    music_path: str | None, sfx_path: str | None,
+    output_path: str,
 ) -> None:
+    """Mix audio layers: voiceover (J-cut) + background music + SFX track."""
     jcut = settings.jcut_offset
-    if music_path and os.path.exists(music_path):
-        vol = settings.music_volume
+    has_music = music_path and os.path.exists(music_path)
+    has_sfx = sfx_path and os.path.exists(sfx_path)
+
+    if has_music and has_sfx:
+        # Full mix: voice + music + SFX (3 audio layers)
+        mvol = settings.music_volume
+        svol = settings.sfx_volume
         cmd = [
             "ffmpeg", "-y",
             "-i", video_path,
-            "-itsoffset", str(-jcut),
-            "-i", voiceover_path,
+            "-itsoffset", str(-jcut), "-i", voiceover_path,
+            "-i", music_path,
+            "-i", sfx_path,
+            "-filter_complex", (
+                f"[2:a]volume={mvol},aloop=loop=-1:size=2e+09[music];"
+                f"[music]atrim=0:duration=300[mt];"
+                f"[3:a]volume={svol}[sfx];"
+                f"[1:a][mt][sfx]amix=inputs=3:duration=first:dropout_transition=2[aout]"
+            ),
+            "-map", "0:v", "-map", "[aout]",
+            "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
+            "-shortest", "-movflags", "+faststart", output_path,
+        ]
+    elif has_music:
+        mvol = settings.music_volume
+        cmd = [
+            "ffmpeg", "-y",
+            "-i", video_path,
+            "-itsoffset", str(-jcut), "-i", voiceover_path,
             "-i", music_path,
             "-filter_complex", (
-                f"[2:a]volume={vol},aloop=loop=-1:size=2e+09[music];"
-                f"[music]atrim=0:duration=300[musictrim];"
-                f"[1:a][musictrim]amix=inputs=2:duration=first:dropout_transition=2[aout]"
+                f"[2:a]volume={mvol},aloop=loop=-1:size=2e+09[music];"
+                f"[music]atrim=0:duration=300[mt];"
+                f"[1:a][mt]amix=inputs=2:duration=first:dropout_transition=2[aout]"
+            ),
+            "-map", "0:v", "-map", "[aout]",
+            "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
+            "-shortest", "-movflags", "+faststart", output_path,
+        ]
+    elif has_sfx:
+        svol = settings.sfx_volume
+        cmd = [
+            "ffmpeg", "-y",
+            "-i", video_path,
+            "-itsoffset", str(-jcut), "-i", voiceover_path,
+            "-i", sfx_path,
+            "-filter_complex", (
+                f"[2:a]volume={svol}[sfx];"
+                f"[1:a][sfx]amix=inputs=2:duration=first:dropout_transition=2[aout]"
             ),
             "-map", "0:v", "-map", "[aout]",
             "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
@@ -387,8 +427,7 @@ async def _mix_audio_jcut(
         cmd = [
             "ffmpeg", "-y",
             "-i", video_path,
-            "-itsoffset", str(-jcut),
-            "-i", voiceover_path,
+            "-itsoffset", str(-jcut), "-i", voiceover_path,
             "-map", "0:v", "-map", "1:a",
             "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
             "-shortest", "-movflags", "+faststart", output_path,
@@ -519,19 +558,6 @@ def _pick_transition(label: str) -> str:
     return random.choice(TRANSITION_MAP.get(label, DEFAULT_TRANSITIONS))
 
 
-def _pick_music(mood: str) -> str | None:
-    music_dir = os.path.join(settings.assets_dir, "music")
-    if not os.path.isdir(music_dir):
-        return None
-    for pattern in [f"{mood}.*", f"{mood}_*"]:
-        matches = glob.glob(os.path.join(music_dir, pattern))
-        if matches:
-            return matches[0]
-    for ext in ["*.mp3", "*.wav", "*.m4a"]:
-        matches = glob.glob(os.path.join(music_dir, ext))
-        if matches:
-            return random.choice(matches)
-    return None
 
 
 def _esc(text: str) -> str:
