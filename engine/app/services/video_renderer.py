@@ -758,7 +758,6 @@ async def render_roast_scene_v2(
 
 
 async def render_roast_posting_scene(
-    clip: str,
     posting_png: str,
     section_bounds: dict[str, tuple[int, int]],
     scene: RoastScene,
@@ -766,79 +765,60 @@ async def render_roast_posting_scene(
     w: int = 1920,
     h: int = 1080,
 ) -> None:
-    """Render a scene with the job posting scrolled to the relevant section.
+    """Render a FULLSCREEN job posting with focus-scroll to the active section.
 
-    Layout: posting (70% left) + B-roll footage (30% right).
-    The posting PNG is tall (1400x2400+) and cropped to show the target section.
+    The posting PNG (1920px wide, 2400+ tall) fills the entire screen.
+    FFmpeg crops a 1080px viewport and scrolls to the section being discussed.
+    No B-roll — the job text IS the content.
     """
     dur = scene.duration
-    posting_w = int(w * 0.70)  # 1344px
-    footage_w = w - posting_w  # 576px
-    src_w, src_h = int(footage_w * 1.4), int(h * 1.4)
-
-    transform = random.choice(["zoom_in", "pan_left", "dolly"])
-    tf = _get_transform(transform, dur, footage_w, h)
 
     # Determine scroll target Y based on highlight_section
     hl = scene.highlight_section
     if hl and hl in section_bounds:
-        target_y = max(0, section_bounds[hl][0] - 80)  # 80px padding above section
+        target_y = max(0, section_bounds[hl][0] - 100)
     elif scene.scene_type == RoastSceneType.JOB_REVEAL:
-        target_y = 0  # Start from top
+        target_y = 0
     else:
         target_y = 0
 
-    # Build overlay quote drawtext if present
-    quote_filter = ""
+    # Scroll expression
+    if scene.scene_type == RoastSceneType.JOB_REVEAL:
+        # Smooth scroll from top to bottom during reveal
+        scroll_expr = f"min(max(0,ih-{h}), max(0,ih-{h})*t/{max(1, dur)})"
+    else:
+        # Static hold at target section
+        scroll_expr = f"min(max(0,ih-{h}), {target_y})"
+
+    # Build vf filter — single input (PNG), no clip needed
+    vf = (
+        f"scale={w}:-1,"
+        f"pad={w}:max(ih+{h},{h}+1):0:{h // 2}:color=0x08080C,"
+        f"crop={w}:{h}:0:'{scroll_expr}',"
+        f"fps={FPS}"
+    )
+
+    # Overlay quote at bottom center with dark pill bg
     if scene.overlay_quote:
         quote = _esc(scene.overlay_quote)
-        quote_filter = (
+        vf += (
+            f",drawbox=x='(w-text_w)/2-15':y=h-90:w='text_w+30':h=50"
+            f":color=black@0.5:t=fill,"
             f"drawtext=fontfile={FONT_PATH}:text='{quote}'"
-            f":fontsize=38:fontcolor=0xFFDD00:borderw=3:bordercolor=0xFF1744"
-            f":x='min(w-text_w-10,{posting_w}+({footage_w}-text_w)/2)'"
-            f":y=h-100"
+            f":fontsize=36:fontcolor=0xFFC828"
+            f":borderw=2:bordercolor=0xFF2D55"
+            f":x=(w-text_w)/2:y=h-82"
             f":enable='between(t,0.8,{max(0.9, dur - 0.3)})'"
             f":alpha='if(lt(t,1.1),(t-0.8)/0.3,if(gt(t,{max(1.0, dur - 0.6)}),({max(1.0, dur - 0.3)}-t)/0.3,1))'"
         )
 
-    # For JOB_REVEAL: scroll from top to bottom over duration
-    if scene.scene_type == RoastSceneType.JOB_REVEAL:
-        scroll_expr = f"min(ih-{h}, (ih-{h})*t/{max(1, dur)})"
-    else:
-        # Static: hold at target section position
-        scroll_expr = f"min(ih-{h}, {target_y})"
-
-    filters = (
-        # B-roll footage (right 30%)
-        f"[0:v]trim=0:{dur},setpts=PTS-STARTPTS,"
-        f"scale={src_w}:{src_h}:force_original_aspect_ratio=decrease,"
-        f"pad={src_w}:{src_h}:(ow-iw)/2:(oh-ih)/2,setsar=1,"
-        f"{COLOR_GRADE},{tf},"
-        f"settb=AVTB,setpts=N/{FPS}/TB,fps={FPS},"
-        f"crop={footage_w}:{h}:(iw-{footage_w})/2:0,"
-        f"eq=brightness=-0.12[footage];"
-        # Posting PNG (left 70%) — scale to width, crop to viewport with scroll
-        f"[1:v]scale={posting_w}:-1,"
-        f"pad={posting_w}:ih+{h}:0:{h//2}:color=0x0D0D0D,"
-        f"crop={posting_w}:{h}:0:'{scroll_expr}'[posting];"
-        # Dark background
-        f"color=c=0x0D0D0D:s={w}x{h}:d={dur}:r={FPS}[base];"
-        # Compose
-        f"[base][posting]overlay=0:0[wpost];"
-        f"[wpost][footage]overlay={posting_w}:0"
-    )
-
-    if quote_filter:
-        filters += f"[comp];[comp]{quote_filter},{LOGO_FILTER}[outv]"
-    else:
-        filters += f"[logo];[logo]{LOGO_FILTER}[outv]"
+    # Logo watermark
+    vf += f",{LOGO_FILTER}"
 
     cmd = [
         "ffmpeg", "-y",
-        "-stream_loop", "-1", "-i", clip,
-        "-i", posting_png,
-        "-filter_complex", filters,
-        "-map", "[outv]",
+        "-loop", "1", "-t", str(dur), "-i", posting_png,
+        "-vf", vf,
         "-t", str(dur),
         "-c:v", "libx264", "-preset", "fast", "-crf", "19",
         "-pix_fmt", "yuv420p", "-an", output_path,

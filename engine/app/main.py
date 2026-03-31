@@ -341,7 +341,7 @@ async def _run_roast_pipeline(job_id: str, req: RoastRequest) -> None:
                     else:
                         posting_png = posting_assets[ji]["full"]
                     await render_roast_posting_scene(
-                        clip, posting_png,
+                        posting_png,
                         posting_assets[ji]["bounds"],
                         scene, scene_path,
                     )

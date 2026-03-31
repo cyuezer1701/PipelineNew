@@ -86,22 +86,22 @@ async def render_job_posting(
     job: JobPosting,
     highlight_section: str = "",
 ) -> tuple[str, dict[str, tuple[int, int]]]:
-    """Render a full job posting as a tall PNG with 2027 glass aesthetic."""
-    width = 1500
-    margin = 70
+    """Render a full job posting as a tall PNG — fullscreen 1920px wide."""
+    width = 1920
+    margin = 100
     inner_w = width - 2 * margin
-    accent_x = margin - 12  # Left accent line position
+    accent_x = margin - 14
 
-    f_company = _font(FONT_BOLD, 32)
-    f_location = _font(FONT_REGULAR, 22)
-    f_title = _font(FONT_BOLD, 44)
-    f_section = _font(FONT_BOLD, 20)
-    f_salary_label = _font(FONT_BOLD, 22)
-    f_salary = _font(FONT_BOLD, 40)
-    f_body = _font(FONT_REGULAR, 24)
-    f_pill = _font(FONT_REGULAR, 20)
-    f_num = _font(FONT_BOLD, 24)
-    f_watermark = _font(FONT_REGULAR, 16)
+    f_company = _font(FONT_BOLD, 36)
+    f_location = _font(FONT_REGULAR, 26)
+    f_title = _font(FONT_BOLD, 52)
+    f_section = _font(FONT_BOLD, 26)
+    f_salary_label = _font(FONT_BOLD, 26)
+    f_salary = _font(FONT_BOLD, 46)
+    f_body = _font(FONT_REGULAR, 28)
+    f_pill = _font(FONT_REGULAR, 24)
+    f_num = _font(FONT_BOLD, 28)
+    f_watermark = _font(FONT_REGULAR, 18)
 
     # ── Pre-calculate heights ──
     sections: dict[str, tuple[int, int]] = {}
@@ -109,29 +109,29 @@ async def render_job_posting(
 
     # Header
     header_start = y
-    y += 80
+    y += 95
     sections["header"] = (header_start, y)
 
     # Title
-    y += 15
+    y += 20
     title_start = y
     title_lines = _wrap_text(job.title, f_title, inner_w)
-    y += len(title_lines) * 54 + 20
+    y += len(title_lines) * 64 + 25
     sections["title"] = (title_start, y)
 
-    y += 20  # divider gap
+    y += 25  # divider gap
 
     # Salary
     salary_start = y
-    y += 90  # card-in-card
+    y += 110  # card-in-card
     sections["salary"] = (salary_start, y)
 
-    y += 25
+    y += 30
 
     # Description
     desc_start = y
     if job.description:
-        y += 35  # label
+        y += 42  # label
         desc_lines = _wrap_text(job.description, f_body, inner_w - 20)
         y += len(desc_lines) * 32 + 15
     sections["description"] = (desc_start, y)
@@ -141,7 +141,7 @@ async def render_job_posting(
     # Benefits
     benefits_start = y
     if job.benefits:
-        y += 35  # label
+        y += 42  # label
         # Pills layout: estimate rows
         pill_x = 0
         for b in job.benefits:
@@ -158,7 +158,7 @@ async def render_job_posting(
     # Requirements
     req_start = y
     if job.requirements:
-        y += 35  # label
+        y += 42  # label
         for req in job.requirements:
             lines = _wrap_text(req, f_body, inner_w - 50)
             y += len(lines) * 32 + 8
@@ -183,19 +183,19 @@ async def render_job_posting(
     # ── Company Header ──
     cc = _company_color(job.company)
     # Avatar circle (larger)
-    draw.ellipse([margin, y, margin + 60, y + 60], fill=cc)
+    draw.ellipse([margin, y, margin + 70, y + 70], fill=cc)
     init = job.company[0].upper() if job.company else "?"
-    ibbox = _font(FONT_BOLD, 30).getbbox(init)
-    draw.text((margin + 30 - ibbox[2] // 2, y + 15), init,
-              font=_font(FONT_BOLD, 30), fill=TEXT_PRIMARY)
+    ibbox = _font(FONT_BOLD, 34).getbbox(init)
+    draw.text((margin + 35 - ibbox[2] // 2, y + 17), init,
+              font=_font(FONT_BOLD, 34), fill=TEXT_PRIMARY)
 
     is_active = highlight_section in ("", "header")
-    draw.text((margin + 78, y + 6), job.company,
+    draw.text((margin + 90, y + 8), job.company,
               font=f_company, fill=TEXT_PRIMARY if is_active else TEXT_TERTIARY)
     if job.location:
-        draw.text((margin + 78, y + 40), job.location,
+        draw.text((margin + 90, y + 46), job.location,
                   font=f_location, fill=TEXT_SECONDARY if is_active else TEXT_TERTIARY)
-    y += 80 + 15
+    y += 95 + 20
 
     # ── Title ──
     is_active = highlight_section in ("", "title")
@@ -203,7 +203,7 @@ async def render_job_posting(
     title_y_start = y
     for line in title_lines:
         draw.text((margin, y), line, font=f_title, fill=tc)
-        y += 54
+        y += 64
     # Underline accent
     if is_active:
         draw.rectangle([(margin, y + 2), (margin + 200, y + 5)], fill=(*ACCENT_CYAN, 150))
@@ -219,7 +219,7 @@ async def render_job_posting(
         ry = title_y_start
         for line in title_lines:
             draw.text((margin, ry), line, font=f_title, fill=TEXT_PRIMARY)
-            ry += 54
+            ry += 64
 
     # ── Divider ──
     draw.rectangle([(margin, y), (width - margin, y + 1)], fill=(*DIVIDER_COLOR, 180))
@@ -231,17 +231,17 @@ async def render_job_posting(
     # Elevated surface background
     sal_bg = CARD_SURFACE if is_active else CARD_BG
     draw.rounded_rectangle(
-        (margin, y, width - margin, y + 75),
+        (margin, y, width - margin, y + 90),
         radius=12, fill=(*sal_bg, 200),
     )
-    draw.text((margin + 20, y + 12), "GEHALT",
+    draw.text((margin + 24, y + 14), "GEHALT",
               font=f_salary_label, fill=ACCENT_CYAN if is_active else TEXT_TERTIARY)
     if job.salary:
         sal_color = ACCENT_GREEN if is_active else TEXT_TERTIARY
-        draw.text((margin + 20, y + 36), job.salary, font=f_salary, fill=sal_color)
+        draw.text((margin + 24, y + 42), job.salary, font=f_salary, fill=sal_color)
     else:
         sal_color = ACCENT_RED if is_active else TEXT_TERTIARY
-        draw.text((margin + 20, y + 36), "Nicht angegeben", font=f_salary, fill=sal_color)
+        draw.text((margin + 24, y + 42), "Nicht angegeben", font=f_salary, fill=sal_color)
     y += 90
 
     if highlight_section == "salary":
