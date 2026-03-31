@@ -36,10 +36,20 @@ async def generate_sfx_track(
 
     Returns path to the SFX track MP3, or None if SFX generation is unavailable.
     """
+    try:
+        return await _generate_sfx_track_inner(scenes, target_duration)
+    except Exception as e:
+        logger.warning("SFX generation failed, skipping: %s", e)
+        return None
+
+
+async def _generate_sfx_track_inner(
+    scenes: list[Scene],
+    target_duration: float,
+) -> str | None:
     if not settings.elevenlabs_api_key:
         return None
 
-    # Ensure we have cached SFX files
     sfx_dir = os.path.join(settings.assets_dir, "sfx")
     os.makedirs(sfx_dir, exist_ok=True)
 
