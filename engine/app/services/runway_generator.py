@@ -110,8 +110,8 @@ async def _generate_single_shot(
 
     logger.info("Runway task submitted: %s", task_id)
 
-    # Poll for completion (max 5 minutes)
-    for _ in range(60):
+    # Poll for completion (max 10 minutes — Gen-4.5 is slower)
+    for _ in range(120):
         await asyncio.sleep(5)
         status_resp = await client.get(f"{RUNWAY_API_BASE}/tasks/{task_id}")
         status_resp.raise_for_status()
@@ -124,7 +124,7 @@ async def _generate_single_shot(
         elif status in ("FAILED", "CANCELLED"):
             raise RuntimeError(f"Runway task {task_id} {status}: {task_data.get('error', '')}")
 
-    raise RuntimeError(f"Runway task {task_id} timed out after 5 minutes")
+    raise RuntimeError(f"Runway task {task_id} timed out after 10 minutes")
 
 
 async def _download_video(client: httpx.AsyncClient, url: str) -> str:
