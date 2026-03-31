@@ -26,10 +26,12 @@ CROSSFADE_DURATION = 0.3
 FPS = 24  # Cinematic framerate
 
 # JOB ROAST logo watermark — appended to every roast scene filter
+# Glass pill logo watermark
 LOGO_FILTER = (
+    f"drawbox=x=20:y=18:w=185:h=40:color=black@0.45:t=fill,"
     f"drawtext=fontfile={FONT_PATH}:text='JOB ROAST'"
-    f":fontsize=28:fontcolor=0xFF1744:borderw=2:bordercolor=black"
-    f":x=30:y=25:alpha=0.85"
+    f":fontsize=24:fontcolor=0xFF2D55:borderw=1:bordercolor=0xFF2D55@0.25"
+    f":x=38:y=26:alpha=0.92"
 )
 
 # ── Aggressive Transforms (20% zoom, 18% pan) ─────────────
@@ -78,12 +80,12 @@ TRANSITION_MAP = {
 DEFAULT_TRANSITIONS = ["fade", "fadeblack", "slideright", "slideleft", "smoothup"]
 
 # Cinematic grade: teal/orange, lifted blacks, grain, vignette
+# 2027 cinematic grade — cleaner, less orange, subtler
 COLOR_GRADE = (
-    "curves=m='0/0.06 0.25/0.22 0.5/0.5 0.75/0.78 1/0.94'"
-    ":r='0/0.06 0.5/0.52 1/0.95':b='0/0.08 0.5/0.48 1/0.92',"
-    "eq=saturation=1.15:contrast=1.1:brightness=0.02,"
-    "noise=alls=4:allf=t,vignette=PI/5,"
-    "rgbashift=rh=-1:bh=1"
+    "curves=m='0/0.05 0.25/0.20 0.5/0.50 0.75/0.80 1/0.95'"
+    ":r='0/0.05 0.5/0.52 1/0.96':b='0/0.07 0.5/0.47 1/0.93',"
+    "eq=saturation=1.12:contrast=1.08:brightness=0.01,"
+    "noise=alls=3:allf=t,vignette=PI/4.5"
 )
 
 
@@ -919,25 +921,33 @@ async def _render_roast_cold_open(
     quote: str, output_path: str, w: int = 1920, h: int = 1080,
     duration: float = 5.0,
 ) -> None:
-    """Cold open: shocking quote slams onto black screen with red glow."""
+    """Cold open: glitch-style quote slam on deep black."""
     dur = duration
     escaped = _esc(quote)
     cmd = [
         "ffmpeg", "-y",
-        "-f", "lavfi", "-i", f"color=c=0x0D0D0D:s={w}x{h}:d={dur}:r={FPS}",
+        "-f", "lavfi", "-i", f"color=c=0x08080C:s={w}x{h}:d={dur}:r={FPS}",
         "-t", str(dur),
         "-vf", (
             f"fps={FPS},vignette=PI/4,"
+            # Red-shifted glitch layer (offset +3px right, -2px up)
             f"drawtext=fontfile={FONT_PATH}:text='{escaped}'"
-            f":fontsize=72:fontcolor=0xFF1744@0.4"
-            f":borderw=8:bordercolor=0xFF1744@0.2"
-            f":x=(w-text_w)/2:y=(h-text_h)/2"
-            f":alpha='if(lt(t,0.4),t/0.4,1)',"
+            f":fontsize=80:fontcolor=0xFF2D55@0.35"
+            f":borderw=0"
+            f":x=(w-text_w)/2+3:y=(h-text_h)/2-2"
+            f":alpha='if(lt(t,0.4),t/0.4,0.7+0.3*sin(t*4))',"
+            # Cyan-shifted glitch layer (offset -2px left, +1px down)
             f"drawtext=fontfile={FONT_PATH}:text='{escaped}'"
-            f":fontsize=72:fontcolor=white"
-            f":borderw=3:bordercolor=0xFF1744"
+            f":fontsize=80:fontcolor=0x00D2FF@0.2"
+            f":borderw=0"
+            f":x=(w-text_w)/2-2:y=(h-text_h)/2+1"
+            f":alpha='if(lt(t,0.4),t/0.4,0.5+0.2*sin(t*6))',"
+            # Main white text
+            f"drawtext=fontfile={FONT_PATH}:text='{escaped}'"
+            f":fontsize=80:fontcolor=0xF0F0F5"
+            f":borderw=2:bordercolor=0xFF2D55"
             f":x=(w-text_w)/2:y=(h-text_h)/2"
-            f":alpha='if(lt(t,0.3),t/0.3,if(gt(t,{dur - 0.5}),({dur}-t)/0.5,1))',"
+            f":alpha='if(lt(t,0.3),t/0.3,if(gt(t,{max(1.0, dur - 0.5)}),({dur}-t)/0.5,1))',"
             f"{LOGO_FILTER}"
         ),
         "-c:v", "libx264", "-preset", "fast", "-crf", "18",
@@ -949,31 +959,38 @@ async def _render_roast_cold_open(
 async def _render_roast_intro(
     output_path: str, w: int = 1920, h: int = 1080, duration: float = 5.0,
 ) -> None:
-    """Branded intro: JOB ROAST neon red on dark background."""
+    """Branded intro: 2027 glass aesthetic with accent line."""
     dur = duration
     name = _esc(settings.roast_channel_name)
-    tagline = _esc(settings.roast_channel_tagline)
+    tagline = _esc("Die schlimmsten Stellenanzeigen \\\\u00B7 Deutschlands")
     cmd = [
         "ffmpeg", "-y",
-        "-f", "lavfi", "-i", f"color=c=0x0D0D0D:s={w}x{h}:d={dur}:r={FPS}",
+        "-f", "lavfi", "-i", f"color=c=0x08080C:s={w}x{h}:d={dur}:r={FPS}",
         "-t", str(dur),
         "-vf", (
-            f"fps={FPS},vignette=PI/3,"
+            f"fps={FPS},vignette=PI/3.5,"
+            # Glow layer
             f"drawtext=fontfile={FONT_PATH}:text='{name}'"
-            f":fontsize=100:fontcolor=0xFF1744@0.35"
-            f":borderw=12:bordercolor=0xFF1744@0.15"
-            f":x=(w-text_w)/2:y=(h-text_h)/2-40"
+            f":fontsize=96:fontcolor=0xFF2D55@0.3"
+            f":borderw=10:bordercolor=0xFF2D55@0.1"
+            f":x=(w-text_w)/2:y=(h-text_h)/2-35"
             f":alpha='min(1,t/0.3)',"
+            # Main title
             f"drawtext=fontfile={FONT_PATH}:text='{name}'"
-            f":fontsize=100:fontcolor=white"
-            f":borderw=3:bordercolor=0xFF1744"
-            f":x=(w-text_w)/2:y=(h-text_h)/2-40"
+            f":fontsize=96:fontcolor=0xF0F0F5"
+            f":borderw=2:bordercolor=0xFF2D55"
+            f":x=(w-text_w)/2:y=(h-text_h)/2-35"
             f":alpha='min(1,t/0.25)',"
+            # Accent line (expanding from center)
+            f"drawbox=x='w/2-150*min(1,(t-0.3)/0.4)':y=h/2+20"
+            f":w='300*min(1,(t-0.3)/0.4)':h=2"
+            f":color=0xFF2D55@0.6:t=fill"
+            f":enable='gte(t,0.3)',"
+            # Tagline
             f"drawtext=fontfile={FONT_PATH}:text='{tagline}'"
-            f":fontsize=28:fontcolor=0x8899CC"
-            f":x=(w-text_w)/2:y=(h/2)+50"
-            f":alpha='if(lt(t,0.5),0,min(1,(t-0.5)/0.3))',"
-            f"{LOGO_FILTER}"
+            f":fontsize=26:fontcolor=0x8C8CA0"
+            f":x=(w-text_w)/2:y=(h/2)+45"
+            f":alpha='if(lt(t,0.6),0,min(1,(t-0.6)/0.3))'"
         ),
         "-c:v", "libx264", "-preset", "fast", "-crf", "18",
         "-pix_fmt", "yuv420p", "-an", output_path,
@@ -984,29 +1001,34 @@ async def _render_roast_intro(
 async def _render_roast_outro(
     output_path: str, w: int = 1920, h: int = 1080, duration: float = 5.0,
 ) -> None:
-    """Outro: ABONNIERT CTA in German with roast branding."""
+    """Outro: clean 2027 CTA with glass aesthetic."""
     dur = duration
     name = _esc(settings.roast_channel_name)
     cmd = [
         "ffmpeg", "-y",
-        "-f", "lavfi", "-i", f"color=c=0x0D0D0D:s={w}x{h}:d={dur}:r={FPS}",
+        "-f", "lavfi", "-i", f"color=c=0x08080C:s={w}x{h}:d={dur}:r={FPS}",
         "-t", str(dur),
         "-vf", (
-            f"fps={FPS},vignette=PI/3,"
+            f"fps={FPS},vignette=PI/3.5,"
+            # ABONNIERT with glow
             f"drawtext=fontfile={FONT_PATH}:text='ABONNIERT'"
-            f":fontsize=80:fontcolor=0xFF1744@0.3"
-            f":x=(w-text_w)/2:y=(h/2)-60:alpha='min(1,t/0.3)',"
-            f"drawtext=fontfile={FONT_PATH}:text='ABONNIERT'"
-            f":fontsize=80:fontcolor=0xFF4444:borderw=2:bordercolor=0x880000"
-            f":x=(w-text_w)/2:y=(h/2)-60:alpha='min(1,t/0.3)',"
+            f":fontsize=76:fontcolor=0xFF2D55"
+            f":borderw=2:bordercolor=0xFF2D55@0.3"
+            f":x=(w-text_w)/2:y=(h/2)-55:alpha='min(1,t/0.3)',"
+            # Channel name
             f"drawtext=fontfile={FONT_PATH}:text='{name}'"
-            f":fontsize=44:fontcolor=white"
-            f":x=(w-text_w)/2:y=(h/2)+40"
+            f":fontsize=38:fontcolor=0xF0F0F5"
+            f":x=(w-text_w)/2:y=(h/2)+35"
             f":alpha='if(lt(t,0.4),0,min(1,(t-0.4)/0.3))',"
-            f"drawtext=fontfile={FONT_PATH}:text='Jeden Tag neue Roasts wallah'"
-            f":fontsize=24:fontcolor=0x8899CC"
-            f":x=(w-text_w)/2:y=(h/2)+100"
-            f":alpha='if(lt(t,0.8),0,min(1,(t-0.8)/0.4))',"
+            # Accent line
+            f"drawbox=x='w/2-120*min(1,(t-0.6)/0.3)':y=h/2+82"
+            f":w='240*min(1,(t-0.6)/0.3)':h=1"
+            f":color=0xFF2D55@0.5:t=fill:enable='gte(t,0.6)',"
+            # Sub-CTA
+            f"drawtext=fontfile={FONT_PATH}:text='Jeden Tag neue Roasts'"
+            f":fontsize=22:fontcolor=0x8C8CA0"
+            f":x=(w-text_w)/2:y=(h/2)+95"
+            f":alpha='if(lt(t,0.8),0,min(1,(t-0.8)/0.3))',"
             f"{LOGO_FILTER}"
         ),
         "-c:v", "libx264", "-preset", "fast", "-crf", "18",
