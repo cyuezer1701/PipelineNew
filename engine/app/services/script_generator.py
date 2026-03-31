@@ -182,7 +182,7 @@ async def generate_script(
 
         try:
             return _parse_response(result)
-        except (json.JSONDecodeError, KeyError) as e:
+        except (json.JSONDecodeError, KeyError, Exception) as e:
             last_error = e
             logger.warning("Script parse failed (attempt %d): %s", attempt + 1, e)
             user_prompt += "\n\nIMPORTANT: Your previous response had invalid JSON. Output ONLY valid JSON, no trailing commas, no comments."
@@ -209,15 +209,23 @@ def _parse_response(raw: str) -> ScriptResponse:
 
     data = json.loads(cleaned)
 
+    SHOT_TYPE_MAP = {
+        "close": "close_up", "closeup": "close_up", "close-up": "close_up",
+        "wide": "wide", "medium": "medium", "establishing": "establishing",
+        "detail": "detail", "over_shoulder": "over_shoulder",
+        "over-shoulder": "over_shoulder", "pov": "over_shoulder",
+    }
+
     scenes = []
     for s in data["scenes"]:
         sub_shots = [SubShot(**ss) for ss in s.get("sub_shots", [])]
+        raw_shot = s.get("shot_type", "medium").lower().strip()
         scene = Scene(
             scene_id=s.get("scene_id", 0),
             label=s.get("label", ""),
             narration=s.get("narration", s.get("text", "")),
             overlay_text=s.get("overlay_text", ""),
-            shot_type=s.get("shot_type", "medium"),
+            shot_type=SHOT_TYPE_MAP.get(raw_shot, "medium"),
             visual_prompt=s.get("visual_prompt", ""),
             b_roll_keywords=s.get("b_roll_keywords", []),
             footage_source=s.get("footage_source", "mixed"),

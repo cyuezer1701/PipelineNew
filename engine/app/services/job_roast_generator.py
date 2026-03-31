@@ -133,7 +133,7 @@ async def generate_roast_script(
 
         try:
             return _parse_roast_response(result)
-        except (json.JSONDecodeError, KeyError) as e:
+        except (json.JSONDecodeError, KeyError, Exception) as e:
             last_error = e
             logger.warning("Roast script parse failed (attempt %d): %s", attempt + 1, e)
             user_prompt += "\n\nWICHTIG: Dein vorheriges JSON war kaputt. Nur valides JSON ausgeben!"
@@ -158,14 +158,25 @@ def _parse_roast_response(raw: str) -> RoastScriptResponse:
 
     data = json.loads(cleaned)
 
+    # Normalize shot_type values from Claude (e.g. "close" → "close_up")
+    SHOT_TYPE_MAP = {
+        "close": "close_up", "closeup": "close_up", "close-up": "close_up",
+        "wide": "wide", "medium": "medium", "establishing": "establishing",
+        "detail": "detail", "over_shoulder": "over_shoulder",
+        "over-shoulder": "over_shoulder", "pov": "over_shoulder",
+    }
+
     scenes = []
     for s in data.get("scenes", []):
+        raw_shot = s.get("shot_type", "medium").lower().strip()
+        shot_type = SHOT_TYPE_MAP.get(raw_shot, "medium")
+
         scenes.append(Scene(
             scene_id=s.get("scene_id", 0),
             label=s.get("label", ""),
             narration=s.get("narration", ""),
             overlay_text=s.get("overlay_text", ""),
-            shot_type=s.get("shot_type", "medium"),
+            shot_type=shot_type,
             visual_prompt=s.get("visual_prompt", ""),
             b_roll_keywords=s.get("b_roll_keywords", ["office", "corporate"]),
             footage_source="pexels",
