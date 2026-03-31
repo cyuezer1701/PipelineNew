@@ -118,3 +118,39 @@ class JobResponse(BaseModel):
     status: JobStatus
     message: str = ""
     result: Optional[dict] = None
+
+
+# ── Job Roast Models ──────────────────────────────────────
+
+class JobPosting(BaseModel):
+    """A single job posting to be roasted."""
+    title: str = Field(..., description="Job title, e.g. 'Senior Full-Stack Developer (m/w/d)'")
+    company: str = Field(..., description="Company name")
+    location: str = ""
+    salary: str = ""
+    benefits: list[str] = Field(default_factory=list)
+    requirements: list[str] = Field(default_factory=list)
+    description: str = ""
+
+
+class RoastRequest(BaseModel):
+    """Request to generate a job roast video."""
+    jobs: list[JobPosting] = Field(..., description="3 job postings to roast")
+    category: str = Field(default="Die schlimmsten Stellenanzeigen", description="Video category/theme")
+    upload: bool = False
+    upload_shorts: bool = False
+    youtube_title: Optional[str] = None
+    youtube_description: Optional[str] = None
+    youtube_tags: list[str] = Field(default_factory=list)
+
+
+class RoastScriptResponse(BaseModel):
+    """Roast script with grouped scenes per job."""
+    full_script: str
+    job_scripts: list[str]  # Individual narration per job (for Shorts)
+    scenes: list[Scene]  # All scenes (intro + jobs + transitions + outro)
+    job_scene_groups: list[list[int]]  # Scene indices per job [[0,1,2],[3,4,5],[6,7,8]]
+    estimated_duration: int
+    music_mood: str = "energetic"
+    thumbnail_text: str = ""
+

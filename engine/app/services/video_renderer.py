@@ -608,3 +608,106 @@ def _safe_remove(path: str) -> None:
         os.remove(path)
     except OSError:
         pass
+
+
+# ── Roast Scene Renderer ──────────────────────────────────
+
+async def render_roast_scene(
+    clip: str,
+    card_image: str,
+    scene: Scene,
+    output_path: str,
+    w: int = 1920,
+    h: int = 1080,
+) -> None:
+    """Render a scene with a job card PNG overlaid on background footage."""
+    dur = scene.duration
+    src_w, src_h = int(w * 1.15), int(h * 1.15)
+
+    transform = random.choice(["zoom_in", "pan_left", "pan_right", "dolly"])
+    tf = _get_transform(transform, dur, w, h)
+
+    # Scale card to fit nicely (70% of video width, centered)
+    card_w = int(w * 0.7)
+
+    # Show card for scenes labeled REVEAL, fade in/out for others
+    is_reveal = "REVEAL" in scene.label.upper()
+    if is_reveal:
+        alpha_expr = f"if(lt(t,0.5),t/0.5,if(gt(t,{dur-0.5}),({dur}-t)/0.5,1))"
+    else:
+        alpha_expr = "0"  # No card for non-reveal scenes
+
+    cmd = [
+        "ffmpeg", "-y",
+        "-i", clip,
+        "-i", card_image,
+        "-filter_complex", (
+            # Background: trim, scale, color grade, transform
+            f"[0:v]trim=0:{dur},setpts=PTS-STARTPTS,"
+            f"scale={src_w}:{src_h}:force_original_aspect_ratio=decrease,"
+            f"pad={src_w}:{src_h}:(ow-iw)/2:(oh-ih)/2,setsar=1,"
+            f"{COLOR_GRADE},{tf},"
+            f"settb=AVTB,setpts=N/25/TB,fps=25[bg];"
+            # Card overlay: scale + alpha
+            f"[1:v]scale={card_w}:-1,format=rgba,"
+            f"colorchannelmixer=aa={alpha_expr}[card];"
+            # Composite: center the card on background
+            f"[bg][card]overlay=(W-w)/2:(H-h)/2:format=auto:shortest=1[outv]"
+        ),
+        "-map", "[outv]",
+        "-t", str(dur),
+        "-c:v", "libx264", "-preset", "fast", "-crf", "19",
+        "-pix_fmt", "yuv420p", "-an", output_path,
+    ]
+    await _run_ffmpeg(cmd)
+
+
+async def render_roast_compilation(
+    scene_files: list[str],
+    scenes: list[Scene],
+    audio_path: str,
+    captions: list[WordTimestamp] | None,
+    music_path: str | None,
+    sfx_path: str | None,
+    target_duration: int,
+    w: int = 1920,
+    h: int = 1080,
+) -> str:
+    """Assemble roast scenes into a final compilation video."""
+    job_id = uuid.uuid4().hex[:8]
+    output_path = os.path.join(settings.output_dir, f"roast_{job_id}.mp4")
+    tmp_files = []
+
+    # Concat scenes with transitions
+    if len(scene_files) == 1:
+        main_path = scene_files[0]
+    else:
+        main_path = os.path.join(settings.output_dir, f"rmain_{job_id}.mp4")
+        tmp_files.append(main_path)
+        await _concat_with_transitions(scene_files, scenes, main_path, target_duration)
+
+    # Text overlays (captions + section labels)
+    text_path = os.path.join(settings.output_dir, f"rtext_{job_id}.mp4")
+    tmp_files.append(text_path)
+    await _apply_text_overlays(main_path, scenes, captions, text_path,
+                                target_duration, w, h, 56, 72)
+
+    # Intro + Outro
+    intro_path = os.path.join(settings.output_dir, f"rintro_{job_id}.mp4")
+    outro_path = os.path.join(settings.output_dir, f"routro_{job_id}.mp4")
+    tmp_files.extend([intro_path, outro_path])
+    await _render_intro(intro_path, w, h)
+    await _render_outro(outro_path, w, h)
+
+    # Concat all
+    concat_path = os.path.join(settings.output_dir, f"rcat_{job_id}.mp4")
+    tmp_files.append(concat_path)
+    await _concat_segments([intro_path, text_path, outro_path], concat_path)
+
+    # Audio mix with J-cut
+    await _mix_audio_jcut(concat_path, audio_path, music_path, sfx_path, output_path)
+
+    for p in tmp_files:
+        _safe_remove(p)
+
+    return output_path

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import uuid
 from contextlib import asynccontextmanager
 
@@ -9,6 +10,7 @@ from app.models import (
     GenerateRequest,
     JobResponse,
     JobStatus,
+    RoastRequest,
     ScriptRequest,
     ScriptResponse,
 )
@@ -162,6 +164,148 @@ async def get_job(job_id: str):
     return jobs[job_id]
 
 
+# ── Job Roast Pipeline ─────────────────────────────────────
+
+async def _run_roast_pipeline(job_id: str, req: RoastRequest) -> None:
+    """Execute the job roast video pipeline."""
+    try:
+        jobs[job_id].status = JobStatus.PROCESSING
+
+        from app.services.job_card_renderer import render_job_card
+        from app.services.job_roast_generator import generate_roast_script
+        from app.services.stock_footage import download_footage_for_sections
+        from app.services.video_renderer import render_roast_compilation, render_roast_scene
+
+        # 1. Generate roast script (Claude — Deutsch, Kanacken-Slang)
+        jobs[job_id].message = "Generating roast script..."
+        roast = await generate_roast_script(req.jobs, req.category)
+
+        # 2. Generate voiceover
+        jobs[job_id].message = "Generating voiceover..."
+        audio_path = await generate_voiceover(roast.full_script)
+
+        # 3. Generate captions
+        jobs[job_id].message = "Generating captions..."
+        captions = await generate_captions(audio_path)
+
+        # 4. Render job cards as PNGs
+        jobs[job_id].message = "Rendering job cards..."
+        card_images = []
+        for job_posting in req.jobs:
+            card_path = await render_job_card(job_posting)
+            card_images.append(card_path)
+
+        # 5. Download background footage
+        jobs[job_id].message = "Downloading footage..."
+        footage_paths = await download_footage_for_sections(roast.scenes)
+
+        # 6. Generate music + SFX
+        jobs[job_id].message = "Generating audio layers..."
+        music_path = await get_music_track(roast.music_mood, roast.estimated_duration)
+        sfx_path = await generate_sfx_track(roast.scenes, roast.estimated_duration)
+
+        # 7. Render each scene (with job card overlay for REVEAL scenes)
+        jobs[job_id].message = "Rendering scenes..."
+        scene_files = []
+        card_idx = 0
+        for idx, scene in enumerate(roast.scenes):
+            scene_path = os.path.join("/app/output", f"rs{idx}_{job_id}.mp4")
+            clip = footage_paths[idx % len(footage_paths)]
+
+            if "REVEAL" in scene.label.upper() and card_idx < len(card_images):
+                await render_roast_scene(clip, card_images[card_idx], scene, scene_path)
+                card_idx += 1
+            else:
+                from app.services.video_renderer import _render_single_scene
+                await _render_single_scene(clip, scene, scene_path, 1920, 1080)
+
+            scene_files.append(scene_path)
+
+        # 8. Extract individual Shorts (one per job)
+        jobs[job_id].message = "Extracting shorts..."
+        short_files = []
+        for i, group in enumerate(roast.job_scene_groups):
+            if not group:
+                continue
+            group_scenes = [roast.scenes[j] for j in group if j < len(scene_files)]
+            group_files = [scene_files[j] for j in group if j < len(scene_files)]
+            if group_files:
+                short_path = os.path.join("/app/output", f"short{i}_{job_id}.mp4")
+                from app.services.video_renderer import _concat_segments
+                await _concat_segments(group_files, short_path)
+                short_files.append({
+                    "path": short_path,
+                    "title": req.jobs[i].title if i < len(req.jobs) else f"Job {i+1}",
+                })
+
+        # 9. Compile full video
+        jobs[job_id].message = "Compiling final video..."
+        output_path = await render_roast_compilation(
+            scene_files=scene_files,
+            scenes=roast.scenes,
+            audio_path=audio_path,
+            captions=captions,
+            music_path=music_path,
+            sfx_path=sfx_path,
+            target_duration=roast.estimated_duration,
+        )
+
+        # 10. Generate thumbnail
+        jobs[job_id].message = "Generating thumbnail..."
+        thumb_text = roast.thumbnail_text or req.category
+        thumbnail_path = await generate_thumbnail(
+            video_path=output_path, text=thumb_text, topic=req.category,
+        )
+
+        result = {
+            "video_path": output_path,
+            "thumbnail_path": thumbnail_path,
+            "shorts": short_files,
+            "script": roast.full_script,
+            "scenes_count": len(roast.scenes),
+        }
+
+        # 11. Upload
+        if req.upload:
+            jobs[job_id].message = "Uploading to YouTube..."
+            yt_title = req.youtube_title or f"JOB ROAST: {req.category}"
+            yt_desc = req.youtube_description or roast.full_script[:3000]
+            video_id = await upload_to_youtube(
+                video_path=output_path, title=yt_title,
+                description=yt_desc, tags=req.youtube_tags or ["job roast", "stellenanzeige", "obstkorb"],
+            )
+            result["youtube_video_id"] = video_id
+
+        if req.upload_shorts:
+            jobs[job_id].message = "Uploading shorts..."
+            result["shorts_video_ids"] = []
+            for short in short_files:
+                short_id = await upload_to_youtube(
+                    video_path=short["path"],
+                    title=f"ROAST: {short['title'][:80]}",
+                    description=f"Job Roast Short\n\n#shorts #jobroast #stellenanzeige #obstkorb",
+                    tags=["shorts", "job roast", "stellenanzeige"],
+                )
+                result["shorts_video_ids"].append(short_id)
+
+        jobs[job_id].status = JobStatus.COMPLETED
+        jobs[job_id].message = "Roast complete"
+        jobs[job_id].result = result
+
+    except Exception as e:
+        jobs[job_id].status = JobStatus.FAILED
+        jobs[job_id].message = str(e)
+
+
+@app.post("/api/roast", response_model=JobResponse)
+async def roast(req: RoastRequest, bg: BackgroundTasks):
+    """Generate a job roast video — 3 jobs roasted + individual Shorts."""
+    job_id = uuid.uuid4().hex[:12]
+    jobs[job_id] = JobResponse(job_id=job_id, status=JobStatus.PENDING, message="Queued")
+    bg.add_task(_run_roast_pipeline, job_id, req)
+    return jobs[job_id]
+
+
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "service": "flowstack-cinematic-engine", "version": "3.2.0"}
+    return {"status": "ok", "service": "flowstack-cinematic-engine", "version": "3.3.0"}
