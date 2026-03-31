@@ -196,7 +196,10 @@ async def _run_roast_pipeline(job_id: str, req: RoastRequest) -> None:
 
         # 2. Generate voiceover
         jobs[job_id].message = "Step 2/10: Generating voiceover..."
-        audio_path = await generate_voiceover(roast.full_script)
+        audio_path = await generate_voiceover(
+            roast.full_script,
+            guide_audio_path=req.guide_audio_url,
+        )
 
         # 3. Generate captions (German)
         jobs[job_id].message = "Step 3/10: Generating German captions..."
@@ -235,13 +238,23 @@ async def _run_roast_pipeline(job_id: str, req: RoastRequest) -> None:
         music_path = await get_music_track(roast.music_mood, roast.estimated_duration)
         sfx_path = await generate_sfx_track(footage_scenes, roast.estimated_duration)
 
-        # 7. Render cold open + branded intro
+        # 7. Render cold open + branded intro (use scene durations from Claude)
         jobs[job_id].message = "Step 7/10: Rendering intro..."
         scene_files = []
+        cold_open_scene = next((s for s in roast.scenes if s.scene_type == RoastSceneType.COLD_OPEN), None)
+        intro_scene = next((s for s in roast.scenes if s.scene_type == RoastSceneType.BRANDED_INTRO), None)
+        outro_scene = next((s for s in roast.scenes if s.scene_type == RoastSceneType.OUTRO), None)
+
         cold_open_path = os.path.join("/app/output", f"coldopen_{job_id}.mp4")
         intro_path = os.path.join("/app/output", f"intro_{job_id}.mp4")
-        await _render_roast_cold_open(roast.cold_open_quote or roast.thumbnail_text, cold_open_path)
-        await _render_roast_intro(intro_path)
+        await _render_roast_cold_open(
+            roast.cold_open_quote or roast.thumbnail_text, cold_open_path,
+            duration=cold_open_scene.duration if cold_open_scene else 5.0,
+        )
+        await _render_roast_intro(
+            intro_path,
+            duration=intro_scene.duration if intro_scene else 5.0,
+        )
         scene_files.extend([cold_open_path, intro_path])
 
         # 8. Render each scene with split-screen + correct card variant
@@ -307,7 +320,10 @@ async def _run_roast_pipeline(job_id: str, req: RoastRequest) -> None:
         # 9. Render outro
         jobs[job_id].message = "Step 9/10: Rendering outro..."
         outro_path = os.path.join("/app/output", f"outro_{job_id}.mp4")
-        await _render_roast_outro(outro_path)
+        await _render_roast_outro(
+            outro_path,
+            duration=outro_scene.duration if outro_scene else 5.0,
+        )
         scene_files.append(outro_path)
 
         # 10. Compile final video (concat + captions + audio mix)

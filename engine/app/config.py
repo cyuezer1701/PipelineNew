@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     # Voiceover (ElevenLabs)
     elevenlabs_api_key: str = ""
     elevenlabs_voice_id: str = "21m00Tcm4TlvDq8ikWAM"
-    elevenlabs_sts_model: str = "eleven_english_sts_v2"
+    elevenlabs_sts_model: str = "eleven_multilingual_v2"
 
     # Runway Gen-4.5
     runway_api_key: str = ""

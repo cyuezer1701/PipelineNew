@@ -23,32 +23,33 @@ logger = logging.getLogger(__name__)
 
 FONT_PATH = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 CROSSFADE_DURATION = 0.3
+FPS = 24  # Cinematic framerate
 
 # ── Aggressive Transforms (20% zoom, 18% pan) ─────────────
 
 TRANSFORM_FILTERS = {
     "zoom_in": (
-        "zoompan=z='1+0.20*on/({dur}*25)'"
+        "zoompan=z='1+0.20*on/({dur}*{fps})'"
         ":x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
-        ":d={dur}*25:s={w}x{h}:fps=25"
+        ":d={dur}*{fps}:s={w}x{h}:fps={fps}"
     ),
     "zoom_out": (
-        "zoompan=z='1.20-0.20*on/({dur}*25)'"
+        "zoompan=z='1.20-0.20*on/({dur}*{fps})'"
         ":x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
-        ":d={dur}*25:s={w}x{h}:fps=25"
+        ":d={dur}*{fps}:s={w}x{h}:fps={fps}"
     ),
     "pan_left": (
-        "zoompan=z=1.08:x='iw*0.18*(on/({dur}*25))'"
-        ":y='ih/2-(ih/zoom/2)':d={dur}*25:s={w}x{h}:fps=25"
+        "zoompan=z=1.08:x='iw*0.18*(on/({dur}*{fps}))'"
+        ":y='ih/2-(ih/zoom/2)':d={dur}*{fps}:s={w}x{h}:fps={fps}"
     ),
     "pan_right": (
-        "zoompan=z=1.08:x='iw*(1-0.18*(on/({dur}*25)))-(iw/zoom)'"
-        ":y='ih/2-(ih/zoom/2)':d={dur}*25:s={w}x{h}:fps=25"
+        "zoompan=z=1.08:x='iw*(1-0.18*(on/({dur}*{fps})))-(iw/zoom)'"
+        ":y='ih/2-(ih/zoom/2)':d={dur}*{fps}:s={w}x{h}:fps={fps}"
     ),
     "dolly": (
-        "zoompan=z='1.03+0.10*sin(on/({dur}*25)*PI)'"
+        "zoompan=z='1.03+0.10*sin(on/({dur}*{fps})*PI)'"
         ":x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
-        ":d={dur}*25:s={w}x{h}:fps=25"
+        ":d={dur}*{fps}:s={w}x{h}:fps={fps}"
     ),
 }
 
@@ -74,7 +75,8 @@ COLOR_GRADE = (
     "curves=m='0/0.06 0.25/0.22 0.5/0.5 0.75/0.78 1/0.94'"
     ":r='0/0.06 0.5/0.52 1/0.95':b='0/0.08 0.5/0.48 1/0.92',"
     "eq=saturation=1.15:contrast=1.1:brightness=0.02,"
-    "noise=alls=3:allf=t,vignette=PI/5"
+    "noise=alls=4:allf=t,vignette=PI/5,"
+    "rgbashift=rh=-1:bh=1"
 )
 
 
@@ -167,7 +169,7 @@ async def _render_single_scene(
                 f"scale={src_w}:{src_h}:force_original_aspect_ratio=decrease,"
                 f"pad={src_w}:{src_h}:(ow-iw)/2:(oh-ih)/2,setsar=1,"
                 f"{COLOR_GRADE},{tf},"
-                f"settb=AVTB,setpts=N/25/TB,fps=25"
+                f"settb=AVTB,setpts=N/{FPS}/TB,fps={FPS}"
             ),
             "-t", str(ss.duration),
             "-c:v", "libx264", "-preset", "fast", "-crf", "19",
@@ -185,7 +187,7 @@ async def _render_single_scene(
                 f"scale={src_w}:{src_h}:force_original_aspect_ratio=decrease,"
                 f"pad={src_w}:{src_h}:(ow-iw)/2:(oh-ih)/2,setsar=1,"
                 f"{COLOR_GRADE},{tf},"
-                f"settb=AVTB,setpts=N/25/TB,fps=25[ss{i}];"
+                f"settb=AVTB,setpts=N/{FPS}/TB,fps={FPS}[ss{i}];"
             )
 
         # Quick-cut transitions within scene (0.15s fade)
@@ -319,11 +321,10 @@ async def _render_intro(output_path: str, w: int, h: int) -> None:
     name, tagline = _esc(settings.channel_name), _esc(settings.channel_tagline)
     cmd = [
         "ffmpeg", "-y",
-        "-f", "lavfi", "-i", f"color=c=0x0a0a2e:s={w}x{h}:d=2.5:r=25",
-        "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo",
+        "-f", "lavfi", "-i", f"color=c=0x0a0a2e:s={w}x{h}:d=2.5:r={FPS}",
         "-t", "2.5",
         "-vf", (
-            f"vignette=PI/3,"
+            f"fps={FPS},vignette=PI/3,"
             f"drawtext=fontfile={FONT_PATH}:text='{name}'"
             f":fontsize='60+60*(t/2.5)':fontcolor=0x4466FF@0.4"
             f":x=(w-text_w)/2:y=(h-text_h)/2-30:alpha='min(1,t/0.4)',"
@@ -337,8 +338,7 @@ async def _render_intro(output_path: str, w: int, h: int) -> None:
             f":alpha='if(lt(t,0.6),0,min(1,(t-0.6)/0.4))'"
         ),
         "-c:v", "libx264", "-preset", "fast", "-crf", "18",
-        "-c:a", "aac", "-b:a", "128k",
-        "-pix_fmt", "yuv420p", "-shortest", output_path,
+        "-pix_fmt", "yuv420p", "-an", output_path,
     ]
     await _run_ffmpeg(cmd)
 
@@ -347,11 +347,10 @@ async def _render_outro(output_path: str, w: int, h: int) -> None:
     name = _esc(settings.channel_name)
     cmd = [
         "ffmpeg", "-y",
-        "-f", "lavfi", "-i", f"color=c=0x0a0a2e:s={w}x{h}:d=4:r=25",
-        "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo",
+        "-f", "lavfi", "-i", f"color=c=0x0a0a2e:s={w}x{h}:d=4:r={FPS}",
         "-t", "4",
         "-vf", (
-            f"vignette=PI/3,"
+            f"fps={FPS},vignette=PI/3,"
             f"drawtext=fontfile={FONT_PATH}:text='SUBSCRIBE'"
             f":fontsize=80:fontcolor=0xFF2222@0.3"
             f":x=(w-text_w)/2:y=(h/2)-70:alpha='min(1,t/0.3)',"
@@ -369,7 +368,7 @@ async def _render_outro(output_path: str, w: int, h: int) -> None:
         ),
         "-c:v", "libx264", "-preset", "fast", "-crf", "18",
         "-c:a", "aac", "-b:a", "128k",
-        "-pix_fmt", "yuv420p", "-shortest", output_path,
+        "-pix_fmt", "yuv420p", "-an", output_path,
     ]
     await _run_ffmpeg(cmd)
 
@@ -591,7 +590,8 @@ def _match_clips(clips: list[str], scenes: list[Scene]) -> list[str]:
 
 def _get_transform(name: str, dur: float, w: int, h: int) -> str:
     tf = TRANSFORM_FILTERS.get(name, TRANSFORM_FILTERS["zoom_in"])
-    return tf.replace("{dur}", str(dur)).replace("{w}", str(w)).replace("{h}", str(h))
+    return (tf.replace("{dur}", str(dur)).replace("{w}", str(w))
+            .replace("{h}", str(h)).replace("{fps}", str(FPS)))
 
 
 def _pick_transition(label: str) -> str:
@@ -622,6 +622,20 @@ def _safe_remove(path: str) -> None:
         os.remove(path)
     except OSError:
         pass
+
+
+async def _probe_duration(path: str) -> float:
+    """Get media file duration in seconds via ffprobe."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "ffprobe", "-v", "error", "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1", path,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, _ = await proc.communicate()
+        return float(stdout.decode().strip())
+    except (ValueError, Exception):
+        return 0.0
 
 
 # ══════════════════════════════════════════════════════════
@@ -665,43 +679,51 @@ async def render_roast_scene_v2(
     tf = _get_transform(transform, dur, footage_w, h)
 
     # Build filter_complex
-    filters = (
-        # Stock footage: right 45%, dimmed, color graded
-        f"[0:v]trim=0:{dur},setpts=PTS-STARTPTS,"
-        f"scale={src_w}:{src_h}:force_original_aspect_ratio=decrease,"
-        f"pad={src_w}:{src_h}:(ow-iw)/2:(oh-ih)/2,setsar=1,"
-        f"{COLOR_GRADE},{tf},"
-        f"settb=AVTB,setpts=N/25/TB,fps=25,"
-        f"crop={footage_w}:{h}:(iw-{footage_w})/2:0,"
-        f"eq=brightness=-0.15[footage];"
-        # Card PNG: left 55%
-        f"[1:v]scale={card_w}:{h}:force_original_aspect_ratio=decrease,"
-        f"pad={card_w}:{h}:(ow-iw)/2:(oh-ih)/2:color=0x0D0D0D,format=rgba,"
-        f"fade=t=in:st=0:d=0.5:alpha=1[card];"
-        # Dark background
-        f"color=c=0x0D0D0D:s={w}x{h}:d={dur}:r=25[base];"
-        # Compose: base + card (left) + footage (right)
-        f"[base][card]overlay=0:0:shortest=1[wcard];"
-        f"[wcard][footage]overlay={card_w}:0:shortest=1"
-    )
+    quote = _esc(scene.overlay_quote) if scene.overlay_quote else ""
+    quote_x = card_w + 40
+    quote_max_w = footage_w - 80
 
-    # Add overlay quote as big yellow text on the footage side
-    if scene.overlay_quote:
-        quote = _esc(scene.overlay_quote)
-        quote_x = card_w + 40
-        quote_max_w = footage_w - 80
-        filters += (
-            f"[quotebase];"
-            f"[quotebase]drawtext=fontfile={FONT_PATH}:text='{quote}'"
+    if quote:
+        # With overlay quote: compose → [composed] → drawtext → [outv]
+        filters = (
+            f"[0:v]trim=0:{dur},setpts=PTS-STARTPTS,"
+            f"scale={src_w}:{src_h}:force_original_aspect_ratio=decrease,"
+            f"pad={src_w}:{src_h}:(ow-iw)/2:(oh-ih)/2,setsar=1,"
+            f"{COLOR_GRADE},{tf},"
+            f"settb=AVTB,setpts=N/{FPS}/TB,fps={FPS},"
+            f"crop={footage_w}:{h}:(iw-{footage_w})/2:0,"
+            f"eq=brightness=-0.15[footage];"
+            f"[1:v]scale={card_w}:{h}:force_original_aspect_ratio=decrease,"
+            f"pad={card_w}:{h}:(ow-iw)/2:(oh-ih)/2:color=0x0D0D0D,format=rgba,"
+            f"fade=t=in:st=0:d=0.5:alpha=1[card];"
+            f"color=c=0x0D0D0D:s={w}x{h}:d={dur}:r={FPS}[base];"
+            f"[base][card]overlay=0:0:shortest=1[wcard];"
+            f"[wcard][footage]overlay={card_w}:0:shortest=1[composed];"
+            f"[composed]drawtext=fontfile={FONT_PATH}:text='{quote}'"
             f":fontsize=54:fontcolor=0xFFDD00:borderw=5:bordercolor=0xFF1744"
             f":x={quote_x}+(({quote_max_w}-text_w)/2)"
             f":y=(h-text_h)/2"
-            f":enable='between(t,0.8,{dur - 0.3})'"
-            f":alpha='if(lt(t,1.1),(t-0.8)/0.3,if(gt(t,{dur - 0.6}),({dur - 0.3}-t)/0.3,1))'"
+            f":enable='between(t,0.8,{max(0.9, dur - 0.3)})'"
+            f":alpha='if(lt(t,1.1),(t-0.8)/0.3,if(gt(t,{max(1.0, dur - 0.6)}),({max(1.0, dur - 0.3)}-t)/0.3,1))'"
+            f"[outv]"
         )
-        filters += "[outv]"
     else:
-        filters += "[outv]"
+        # No quote: compose → [outv] directly
+        filters = (
+            f"[0:v]trim=0:{dur},setpts=PTS-STARTPTS,"
+            f"scale={src_w}:{src_h}:force_original_aspect_ratio=decrease,"
+            f"pad={src_w}:{src_h}:(ow-iw)/2:(oh-ih)/2,setsar=1,"
+            f"{COLOR_GRADE},{tf},"
+            f"settb=AVTB,setpts=N/{FPS}/TB,fps={FPS},"
+            f"crop={footage_w}:{h}:(iw-{footage_w})/2:0,"
+            f"eq=brightness=-0.15[footage];"
+            f"[1:v]scale={card_w}:{h}:force_original_aspect_ratio=decrease,"
+            f"pad={card_w}:{h}:(ow-iw)/2:(oh-ih)/2:color=0x0D0D0D,format=rgba,"
+            f"fade=t=in:st=0:d=0.5:alpha=1[card];"
+            f"color=c=0x0D0D0D:s={w}x{h}:d={dur}:r={FPS}[base];"
+            f"[base][card]overlay=0:0:shortest=1[wcard];"
+            f"[wcard][footage]overlay={card_w}:0:shortest=1[outv]"
+        )
 
     cmd = [
         "ffmpeg", "-y",
@@ -733,7 +755,7 @@ async def render_roast_fullscreen(
             f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color=0x0D0D0D,"
             f"format=yuv420p,"
             f"fade=t=in:st=0:d=0.4,fade=t=out:st={max(0, dur - 0.4)}:d=0.4,"
-            f"settb=AVTB,setpts=N/25/TB,fps=25"
+            f"settb=AVTB,setpts=N/{FPS}/TB,fps={FPS}"
         ),
         "-c:v", "libx264", "-preset", "fast", "-crf", "19",
         "-pix_fmt", "yuv420p", "-an", output_path,
@@ -743,82 +765,80 @@ async def render_roast_fullscreen(
 
 async def _render_roast_cold_open(
     quote: str, output_path: str, w: int = 1920, h: int = 1080,
+    duration: float = 5.0,
 ) -> None:
-    """5s cold open: shocking quote slams onto black screen with red glow."""
+    """Cold open: shocking quote slams onto black screen with red glow."""
+    dur = duration
     escaped = _esc(quote)
     cmd = [
         "ffmpeg", "-y",
-        "-f", "lavfi", "-i", f"color=c=0x0D0D0D:s={w}x{h}:d=5:r=25",
-        "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo",
-        "-t", "5",
+        "-f", "lavfi", "-i", f"color=c=0x0D0D0D:s={w}x{h}:d={dur}:r={FPS}",
+        "-t", str(dur),
         "-vf", (
-            f"vignette=PI/4,"
-            # Red glow shadow
+            f"fps={FPS},vignette=PI/4,"
             f"drawtext=fontfile={FONT_PATH}:text='{escaped}'"
             f":fontsize=72:fontcolor=0xFF1744@0.4"
             f":borderw=8:bordercolor=0xFF1744@0.2"
             f":x=(w-text_w)/2:y=(h-text_h)/2"
             f":alpha='if(lt(t,0.4),t/0.4,1)',"
-            # Main white text
             f"drawtext=fontfile={FONT_PATH}:text='{escaped}'"
             f":fontsize=72:fontcolor=white"
             f":borderw=3:bordercolor=0xFF1744"
             f":x=(w-text_w)/2:y=(h-text_h)/2"
-            f":alpha='if(lt(t,0.3),t/0.3,if(gt(t,4.5),(5-t)/0.5,1))'"
+            f":alpha='if(lt(t,0.3),t/0.3,if(gt(t,{dur - 0.5}),({dur}-t)/0.5,1))'"
         ),
         "-c:v", "libx264", "-preset", "fast", "-crf", "18",
-        "-c:a", "aac", "-b:a", "128k",
-        "-pix_fmt", "yuv420p", "-shortest", output_path,
+        "-pix_fmt", "yuv420p", "-an", output_path,
     ]
     await _run_ffmpeg(cmd)
 
 
-async def _render_roast_intro(output_path: str, w: int = 1920, h: int = 1080) -> None:
-    """5s branded intro: JOB ROAST neon red on dark background."""
+async def _render_roast_intro(
+    output_path: str, w: int = 1920, h: int = 1080, duration: float = 5.0,
+) -> None:
+    """Branded intro: JOB ROAST neon red on dark background."""
+    dur = duration
     name = _esc(settings.roast_channel_name)
     tagline = _esc(settings.roast_channel_tagline)
     cmd = [
         "ffmpeg", "-y",
-        "-f", "lavfi", "-i", f"color=c=0x0D0D0D:s={w}x{h}:d=5:r=25",
-        "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo",
-        "-t", "5",
+        "-f", "lavfi", "-i", f"color=c=0x0D0D0D:s={w}x{h}:d={dur}:r={FPS}",
+        "-t", str(dur),
         "-vf", (
-            f"vignette=PI/3,"
-            # Red glow behind title
+            f"fps={FPS},vignette=PI/3,"
             f"drawtext=fontfile={FONT_PATH}:text='{name}'"
             f":fontsize=100:fontcolor=0xFF1744@0.35"
             f":borderw=12:bordercolor=0xFF1744@0.15"
             f":x=(w-text_w)/2:y=(h-text_h)/2-40"
             f":alpha='min(1,t/0.3)',"
-            # Main title
             f"drawtext=fontfile={FONT_PATH}:text='{name}'"
             f":fontsize=100:fontcolor=white"
             f":borderw=3:bordercolor=0xFF1744"
             f":x=(w-text_w)/2:y=(h-text_h)/2-40"
             f":alpha='min(1,t/0.25)',"
-            # Tagline
             f"drawtext=fontfile={FONT_PATH}:text='{tagline}'"
             f":fontsize=28:fontcolor=0x8899CC"
             f":x=(w-text_w)/2:y=(h/2)+50"
             f":alpha='if(lt(t,0.5),0,min(1,(t-0.5)/0.3))'"
         ),
         "-c:v", "libx264", "-preset", "fast", "-crf", "18",
-        "-c:a", "aac", "-b:a", "128k",
-        "-pix_fmt", "yuv420p", "-shortest", output_path,
+        "-pix_fmt", "yuv420p", "-an", output_path,
     ]
     await _run_ffmpeg(cmd)
 
 
-async def _render_roast_outro(output_path: str, w: int = 1920, h: int = 1080) -> None:
-    """5s outro: ABONNIERT CTA in German with roast branding."""
+async def _render_roast_outro(
+    output_path: str, w: int = 1920, h: int = 1080, duration: float = 5.0,
+) -> None:
+    """Outro: ABONNIERT CTA in German with roast branding."""
+    dur = duration
     name = _esc(settings.roast_channel_name)
     cmd = [
         "ffmpeg", "-y",
-        "-f", "lavfi", "-i", f"color=c=0x0D0D0D:s={w}x{h}:d=5:r=25",
-        "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo",
-        "-t", "5",
+        "-f", "lavfi", "-i", f"color=c=0x0D0D0D:s={w}x{h}:d={dur}:r={FPS}",
+        "-t", str(dur),
         "-vf", (
-            f"vignette=PI/3,"
+            f"fps={FPS},vignette=PI/3,"
             f"drawtext=fontfile={FONT_PATH}:text='ABONNIERT'"
             f":fontsize=80:fontcolor=0xFF1744@0.3"
             f":x=(w-text_w)/2:y=(h/2)-60:alpha='min(1,t/0.3)',"
@@ -835,8 +855,7 @@ async def _render_roast_outro(output_path: str, w: int = 1920, h: int = 1080) ->
             f":alpha='if(lt(t,0.8),0,min(1,(t-0.8)/0.4))'"
         ),
         "-c:v", "libx264", "-preset", "fast", "-crf", "18",
-        "-c:a", "aac", "-b:a", "128k",
-        "-pix_fmt", "yuv420p", "-shortest", output_path,
+        "-pix_fmt", "yuv420p", "-an", output_path,
     ]
     await _run_ffmpeg(cmd)
 
@@ -893,11 +912,20 @@ async def render_roast_compilation_v2(
     else:
         text_path = main_path
 
+    # Duration sanity check before audio mix
+    video_dur = await _probe_duration(text_path)
+    audio_dur = await _probe_duration(audio_path)
+    if video_dur > 0 and audio_dur > 0 and abs(video_dur - audio_dur) > 10.0:
+        logger.warning(
+            "Duration mismatch: video=%.1fs, voiceover=%.1fs (delta=%.1fs)",
+            video_dur, audio_dur, video_dur - audio_dur,
+        )
+
     # Audio mix with J-cut
     await _mix_audio_jcut(text_path, audio_path, music_path, sfx_path, output_path)
 
     for p in tmp_files:
         _safe_remove(p)
 
-    logger.info("Roast V4 rendered: %s", output_path)
+    logger.info("Roast V4 rendered: %s (%.1fs video, %.1fs audio)", output_path, video_dur, audio_dur)
     return output_path

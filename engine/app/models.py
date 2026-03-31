@@ -165,6 +165,7 @@ class RoastRequest(BaseModel):
     jobs: list[JobPosting] = Field(..., description="3 job postings to roast")
     category: str = Field(default="Die schlimmsten Stellenanzeigen", description="Video category/theme")
     upload: bool = False
+    guide_audio_url: Optional[str] = Field(default=None, description="Guide audio for STS voice cloning")
     youtube_title: Optional[str] = None
     youtube_description: Optional[str] = None
     youtube_tags: list[str] = Field(default_factory=list)
