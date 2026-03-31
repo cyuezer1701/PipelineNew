@@ -1,7 +1,8 @@
-"""Thumbnail generation — AI-generated or frame-extracted.
+"""Thumbnail generation — Ideogram AI or frame-extracted.
 
-If OpenAI API key is configured, generates a custom thumbnail using DALL-E 3.
-Otherwise falls back to extracting a frame from the video with text overlay.
+If Ideogram API key is configured, generates a custom YouTube thumbnail
+with bold text rendered directly in the image (Ideogram is best at text-on-image).
+Falls back to extracting a frame from the video with FFmpeg text overlay.
 """
 from __future__ import annotations
 
@@ -18,6 +19,8 @@ logger = logging.getLogger(__name__)
 
 FONT_PATH = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 
+IDEOGRAM_API_URL = "https://api.ideogram.ai/generate"
+
 
 async def generate_thumbnail(
     video_path: str,
@@ -25,48 +28,55 @@ async def generate_thumbnail(
     topic: str = "",
     output_path: str | None = None,
 ) -> str:
-    """Generate a YouTube thumbnail — AI-generated or frame-extracted."""
+    """Generate a YouTube thumbnail — Ideogram AI or frame-extracted."""
     if not output_path:
         base = os.path.splitext(video_path)[0]
         output_path = f"{base}_thumb.jpg"
 
-    if settings.openai_api_key:
+    if settings.ideogram_api_key:
         try:
-            return await _generate_dalle_thumbnail(text, topic, output_path)
+            return await _generate_ideogram_thumbnail(text, topic, output_path)
         except Exception as e:
-            logger.warning("DALL-E thumbnail failed, falling back to frame extraction: %s", e)
+            logger.warning("Ideogram thumbnail failed, falling back to frame extraction: %s", e)
 
     return await _extract_frame_thumbnail(video_path, text, output_path)
 
 
-async def _generate_dalle_thumbnail(text: str, topic: str, output_path: str) -> str:
-    """Generate a thumbnail using DALL-E 3 via OpenAI API."""
+async def _generate_ideogram_thumbnail(text: str, topic: str, output_path: str) -> str:
+    """Generate a thumbnail using Ideogram API (best at text-on-image)."""
+    # Ideogram renders text directly into the image — perfect for thumbnails
     prompt = (
-        f"YouTube thumbnail for a tech tutorial video. Topic: '{topic}'. "
-        f"Bold, eye-catching design. Vibrant colors with blue and orange tones. "
-        f"Modern tech aesthetic, clean composition, dramatic lighting. "
-        f"Show abstract tech visuals, glowing screens, data visualization. "
-        f"NO text in the image. Photorealistic, cinematic, 4K quality. "
-        f"Style: like top YouTube tech channels (MKBHD, Fireship)."
+        f'YouTube thumbnail with large bold text "{text.upper()}" prominently displayed. '
+        f"Topic: {topic}. "
+        f"Eye-catching design with vibrant blue and orange color scheme. "
+        f"Modern tech aesthetic, dramatic lighting, clean composition. "
+        f"Abstract technology background with glowing elements, data visualization, "
+        f"circuit patterns. The text must be huge, bold, and clearly readable. "
+        f"Professional YouTube thumbnail style like MKBHD or Fireship. "
+        f"16:9 aspect ratio, high contrast, cinematic."
     )
 
-    async with httpx.AsyncClient(timeout=60.0) as client:
+    async with httpx.AsyncClient(timeout=90.0) as client:
         response = await client.post(
-            "https://api.openai.com/v1/images/generations",
+            IDEOGRAM_API_URL,
             headers={
-                "Authorization": f"Bearer {settings.openai_api_key}",
+                "Api-Key": settings.ideogram_api_key,
                 "Content-Type": "application/json",
             },
             json={
-                "model": "dall-e-3",
-                "prompt": prompt,
-                "n": 1,
-                "size": "1792x1024",
-                "quality": "hd",
+                "image_request": {
+                    "prompt": prompt,
+                    "aspect_ratio": "ASPECT_16_9",
+                    "model": "V_2",
+                    "magic_prompt_option": "AUTO",
+                    "style_type": "REALISTIC",
+                },
             },
         )
         response.raise_for_status()
         data = response.json()
+
+        # Get the image URL from response
         image_url = data["data"][0]["url"]
 
         # Download the generated image
@@ -77,47 +87,26 @@ async def _generate_dalle_thumbnail(text: str, topic: str, output_path: str) -> 
                 async for chunk in resp.aiter_bytes(chunk_size=65536):
                     f.write(chunk)
 
-    # Add bold text overlay on top of AI image
-    await _add_text_to_thumbnail(img_path, text, output_path)
-
+    # Scale to YouTube thumbnail size (1280x720)
+    await _scale_thumbnail(img_path, output_path)
     _safe_remove(img_path)
-    logger.info("DALL-E thumbnail generated: %s", output_path)
+
+    logger.info("Ideogram thumbnail generated: %s", output_path)
     return output_path
 
 
-async def _add_text_to_thumbnail(image_path: str, text: str, output_path: str) -> None:
-    """Add bold YouTube-style text overlay to a thumbnail image."""
-    escaped = (
-        text.upper()
-        .replace("'", "\u2019")
-        .replace(":", "\\:")
-        .replace("%", "\\%")
-    )
-
+async def _scale_thumbnail(image_path: str, output_path: str) -> None:
+    """Scale image to 1280x720 for YouTube."""
     cmd = [
         "ffmpeg", "-y", "-i", image_path,
-        "-vf", (
-            f"scale=1280:720:force_original_aspect_ratio=decrease,"
-            f"pad=1280:720:(ow-iw)/2:(oh-ih)/2,"
-            # Darken bottom area for text readability
-            f"drawbox=x=0:y=ih*0.55:w=iw:h=ih*0.45:color=black@0.45:t=fill,"
-            # Bold text with heavy stroke
-            f"drawtext=fontfile={FONT_PATH}:text='{escaped}'"
-            f":fontsize=82:fontcolor=white"
-            f":borderw=6:bordercolor=black"
-            f":x=(w-text_w)/2:y=(h-th)/2+60"
-        ),
+        "-vf", "scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2",
         "-q:v", "2",
         output_path,
     ]
-
     proc = await asyncio.create_subprocess_exec(
         *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
     )
-    _, stderr = await proc.communicate()
-    if proc.returncode != 0:
-        error_msg = stderr.decode()[-500:] if stderr else "Unknown error"
-        raise RuntimeError(f"Thumbnail text overlay failed: {error_msg}")
+    await proc.communicate()
 
 
 async def _extract_frame_thumbnail(video_path: str, text: str, output_path: str) -> str:

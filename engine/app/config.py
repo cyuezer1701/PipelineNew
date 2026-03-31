@@ -19,8 +19,8 @@ class Settings(BaseSettings):
     # AI Music (Mubert)
     mubert_api_key: str = ""
 
-    # AI Thumbnails (OpenAI DALL-E)
-    openai_api_key: str = ""
+    # AI Thumbnails (Ideogram)
+    ideogram_api_key: str = ""
 
     # YouTube
     youtube_client_id: str = ""
