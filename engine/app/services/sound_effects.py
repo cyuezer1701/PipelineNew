@@ -99,13 +99,20 @@ async def _ensure_sfx_cached(sfx_dir: str) -> None:
 
 
 def _get_transition_times(scenes: list[Scene]) -> list[float]:
-    """Calculate timestamps where scene transitions happen."""
+    """Calculate timestamps where scene transitions happen.
+    Limits to max 8 transitions to avoid FFmpeg amix input limits."""
     times = []
     current = 0.0
     for i, scene in enumerate(scenes):
         current += scene.duration
-        if i < len(scenes) - 1:  # Don't add after last scene
+        if i < len(scenes) - 1:
             times.append(current)
+
+    # Limit to max 8 SFX — pick evenly spaced transitions
+    if len(times) > 8:
+        step = len(times) / 8
+        times = [times[int(i * step)] for i in range(8)]
+
     return times
 
 
