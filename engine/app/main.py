@@ -206,6 +206,21 @@ async def _run_roast_pipeline(job_id: str, req: RoastRequest) -> None:
             guide_audio_path=req.guide_audio_url,
         )
 
+        # 2b. Recalibrate scene durations to match actual voiceover length
+        from app.services.video_renderer import _probe_duration
+        actual_audio_dur = await _probe_duration(audio_path)
+        if actual_audio_dur > 0:
+            estimated_total = sum(s.duration for s in roast.scenes)
+            if estimated_total > 0 and abs(actual_audio_dur - estimated_total) > 5:
+                ratio = actual_audio_dur / estimated_total
+                logger.info(
+                    "Recalibrating scene durations: estimated=%.1fs, actual_audio=%.1fs, ratio=%.2f",
+                    estimated_total, actual_audio_dur, ratio,
+                )
+                for s in roast.scenes:
+                    s.duration = round(s.duration * ratio, 1)
+                roast.estimated_duration = int(actual_audio_dur)
+
         # 3. Skip captions (not needed — overlay quotes are baked into scenes)
         captions = None
 

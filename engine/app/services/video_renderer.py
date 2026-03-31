@@ -398,9 +398,11 @@ async def _mix_audio_jcut(
     has_music = music_path and os.path.exists(music_path)
     has_sfx = sfx_path and os.path.exists(sfx_path)
 
-    # Probe video duration to cap output
+    # Use the LONGER of video/audio duration to avoid cutting off narration
     vid_dur = await _probe_duration(video_path)
-    t_flag = ["-t", str(int(vid_dur) + 2)] if vid_dur > 0 else []
+    audio_dur = await _probe_duration(voiceover_path)
+    max_dur = max(vid_dur, audio_dur)
+    t_flag = ["-t", str(int(max_dur) + 2)] if max_dur > 0 else []
 
     if has_music and has_sfx:
         mvol = settings.music_volume
